@@ -167,22 +167,31 @@ function buildData(){
    const blocks=[...(sicByKey[key]||[])].filter(Boolean);
    const items=[]; for(let i=1;i<=6;i++){const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]),q=num(r['QTYMAT'+i]||r['QTY'+i]);if(mc&&q)items.push({mc,q})}
    if(!items.length)return;
-   if(blocks.length!==1){unmappedMaterial.push({reason:'BLOCK_NOT_UNIQUE',key,items,family});return}
-   const block=blocks[0];
-   const matSet=new Set(items.map(x=>normMat(mat(x.mc).DESCRIPTION||x.mc)));
-   const candidates=[];
-   for(const type of ['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4']){
-     if(family && !type.startsWith(family))continue;
-     const bs=new Set(baseTypeItems(block,type).map(x=>normMat(x.material)));
-     if(bs.size===matSet.size && [...matSet].every(m=>bs.has(m)))candidates.push(type);
-   }
-   if(candidates.length!==1){unmappedMaterial.push({reason:'PRESCRIPTION_NOT_UNIQUE',block,w,family,key,items,candidates});return}
-   const type=candidates[0];
-   items.forEach(it=>{
-     const md=mat(it.mc),name=md.DESCRIPTION||it.mc,canonical=normMat(name),k=[block,type,canonical].join('|');
-     actualSprayUsage[k]??={block,type,material:canonical,displayMaterial:name,code:it.mc,qty:0,ws:w,date:clean(r.TANGGAL),job:c};
-     actualSprayUsage[k].qty+=it.q;
-     materialByBlock[block]??={}; materialByBlock[block][it.mc]=(materialByBlock[block][it.mc]||0)+it.q;
+   // Material row dapat mewakili lebih dari satu blok karena T_MATERIAL tidak membawa BLOKCODE.
+   // Jangan membuang row dan jangan memilih blocks[0]. Untuk multi-block, alokasikan qty berdasarkan
+   // kontribusi P4 pada T_SIC dengan key JOBCODE + MANDORCODE + tanggal yang sama.
+   const sicRowsForKey=sic.filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===key && clean(x.BLOKCODE));
+   const p4ByBlock={}; sicRowsForKey.forEach(x=>{const b=clean(x.BLOKCODE),p=num(x.P4);if(p>0)p4ByBlock[b]=(p4ByBlock[b]||0)+p});
+   const targetBlocks=blocks.length?blocks:Object.keys(p4ByBlock);
+   const totalP4=targetBlocks.reduce((a,b)=>a+(p4ByBlock[b]||0),0);
+   if(!targetBlocks.length||totalP4<=0){unmappedMaterial.push({reason:'BLOCK_NOT_RESOLVED',key,items,family});return}
+   targetBlocks.forEach(block=>{
+     const share=(p4ByBlock[block]||0)/totalP4;
+     const matSet=new Set(items.map(x=>normMat(mat(x.mc).DESCRIPTION||x.mc)));
+     const candidates=[];
+     for(const type of ['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4']){
+       if(family && !type.startsWith(family))continue;
+       const bs=new Set(baseTypeItems(block,type).map(x=>normMat(x.material)));
+       if(bs.size===matSet.size && [...matSet].every(m=>bs.has(m)))candidates.push(type);
+     }
+     if(candidates.length!==1){unmappedMaterial.push({reason:'PRESCRIPTION_NOT_UNIQUE',block,w,family,key,items,candidates,share});return}
+     const type=candidates[0];
+     items.forEach(it=>{
+       const md=mat(it.mc),name=md.DESCRIPTION||it.mc,canonical=normMat(name),k=[block,type,canonical].join('|');
+       actualSprayUsage[k]??={block,type,material:canonical,displayMaterial:name,code:it.mc,qty:0,ws:w,date:clean(r.TANGGAL),job:c};
+       actualSprayUsage[k].qty+=it.q*share;
+       materialByBlock[block]??={}; materialByBlock[block][it.mc]=(materialByBlock[block][it.mc]||0)+it.q*share;
+     });
    });
  });
 
@@ -244,7 +253,7 @@ function renderDashboard(){let d=state.data||buildData();$('kHa').textContent=fm
 function renderPages(){let d=state.data||buildData();const workerItemHa=new Map();(d.workerItemRows||[]).forEach(z=>{const k=[z.date,z.b,z.code].join('|');workerItemHa.set(k,(workerItemHa.get(k)||0)+z.ha)});$('executionTable').innerHTML=d.valid.length?d.valid.map(r=>`<tr><td>${r.ATTTIME||r.S_TIME||'—'}</td><td>${r.NAMA||r.EMPNO||'—'}</td><td>${r.JOBCODE}</td><td>${r._ws}</td><td>${r.BLOKCODE||'—'}</td><td>${(r.LAT||r.S_LAT)&& (r.LONG||r.S_LONG)?'✓':'—'}</td><td>${clean(r.PHOTO_PATH)||clean(r.PHOTO_PATH2)?'✓':'—'}</td></tr>`).join(''):`<tr><td colspan="7" class="empty">Belum ada data.</td></tr>`;
  WS.forEach(w=>{let x=workData(w),el=$('page-'+(w==='OTHER'?'other':w.toLowerCase()));el.innerHTML=`<div class="eyebrow">WORKSTREAM</div><div class="detailTitle">${w==='OTHER'?'PRUNING':w}</div><div class="meta">Detail aktual dari dataset aktif · klik menu lain untuk berpindah engine.</div><div class="detailKpis"><div class="detailKpi"><small>Luas</small><b>${fmt(x.ha)} Ha</b></div><div class="detailKpi"><small>Blok</small><b>${fmt(x.blocks)}</b></div><div class="detailKpi"><small>HK / Worker</small><b>${fmt(x.hk)}</b></div><div class="detailKpi"><small>Racun</small><b>${fmt(x.racun)} L</b></div></div><div class="card"><div class="head"><h3>Realisasi per Blok</h3><span>${w}</span></div><table><thead><tr><th>Blok</th><th>Ha</th><th>Worker</th><th>Racun L</th></tr></thead><tbody>${d.blockRows.filter(r=>r[w]>0).map(r=>`<tr><td>${r.block}</td><td>${fmt(r[w])}</td><td>${fmt(r.HKWS?.[w]?.size||0)}</td><td>${(r.RacunWS?.[w]||0)>0?fmt(r.RacunWS[w]):'—'}</td></tr>`).join('')||`<tr><td colspan="4" class="empty">Tidak ada transaksi ${w==='OTHER'?'PRUNING':w}.</td></tr>`}</tbody></table></div><div class="card" style="margin-top:10px"><div class="head"><h3>HK per Item</h3><span>1 worker = 1 HK pada item</span></div><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Blok</th><th>Item</th><th>HK</th><th>Ha</th><th>Ha/HK</th></tr></thead><tbody>${itemHKRows().filter(x=>x.ws===w).map(x=>{const ha=(workerItemHa.get([x.date,x.block,x.code].join('|'))||0);return`<tr><td>${x.date}</td><td>${x.block}</td><td>${itemName(x.code)}</td><td>${fmt(x.hk)}</td><td>${fmt(ha)}</td><td>${x.hk?fmt(ha/x.hk):'—'}</td></tr>`}).join('')||`<tr><td colspan="6" class="empty">Tidak ada item ${w==='OTHER'?'PRUNING':w}.</td></tr>`}</tbody></table></div></div>`});
  const normBalanceMat=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return alias[n]||n};
- const rawMaterialRows=[]; (d.mats||[]).forEach(r=>{const date=normDate(r.TANGGAL)||normDate(r.DATE)||d.date||'—'; const directBlock=clean(r.BLOKCODE||r.BLOCKCODE||r.BLOCK); const resolvedBlocks=[...(d.sicByKeyMap?.[[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')]||[])].filter(Boolean); const block=directBlock||resolvedBlocks[0]||'—'; for(let i=1;i<=6;i++){const code=clean(r['MAT'+i]||r['MATERIALCODE'+i]); const qty=num(r['QTYMAT'+i]||r['QTY'+i]); if(!code||!qty)continue; const md=mat(code); rawMaterialRows.push({date,block,job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty,uom:md.UOM||'—'});}});
+ const rawMaterialRows=[]; (d.mats||[]).forEach(r=>{const date=normDate(r.TANGGAL)||normDate(r.DATE)||d.date||'—'; const directBlock=clean(r.BLOKCODE||r.BLOCKCODE||r.BLOCK); const resolvedBlocks=[...(d.sicByKeyMap?.[[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')]||[])].filter(Boolean); const targetBlocks=directBlock?[directBlock]:resolvedBlocks; const sicRows=(d.sic||[]).filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')&&clean(x.BLOKCODE)); const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(v>0)p4[b]=(p4[b]||0)+v}); const totalP4=targetBlocks.reduce((a,b)=>a+(p4[b]||0),0); for(let i=1;i<=6;i++){const code=clean(r['MAT'+i]||r['MATERIALCODE'+i]); const qty=num(r['QTYMAT'+i]||r['QTY'+i]); if(!code||!qty)continue; const md=mat(code); if(!targetBlocks.length){rawMaterialRows.push({date,block:'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty,uom:md.UOM||'—'});continue;} targetBlocks.forEach(b=>{const share=directBlock?1:(totalP4>0?(p4[b]||0)/totalP4:1/targetBlocks.length);rawMaterialRows.push({date,block:b||'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty:qty*share,uom:md.UOM||'—'});});}});
  $('materialDetail').innerHTML=rawMaterialRows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.job.localeCompare(b.job)||a.code.localeCompare(b.code)).map(v=>`<tr><td>${v.date}</td><td>${v.block}</td><td>${itemName(v.job)}</td><td><b>${v.material}</b></td><td>${v.code}</td><td>${fmt(v.qty)}</td><td>${v.uom}</td><td>${v.job}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">Belum ada racun aktual dari T_MATERIAL.</td></tr>`;
  // MATERIAL BALANCE — Engine 05 Actual T_MATERIAL minus Engine 06 Base Prescription.
  const balanceRows=[];
@@ -259,12 +268,19 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
    const date=normDate(r.TANGGAL||r.DATE)||d.date||'', jobCode=clean(r.JOBCODE), mandor=clean(r.MANDORCODE);
    const key=[jobCode,mandor,date].join('|'), blocks=[...(d.sicByKeyMap?.[key]||[])].filter(Boolean), items=[];
    for(let i=1;i<=6;i++){const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]),q=num(r['QTYMAT'+i]||r['QTY'+i]);if(!mc||!q)continue;const md=mat(mc),name=md.DESCRIPTION||mc;items.push({code:mc,qty:q,material:name,uom:md.UOM||'—',canonical:normBalanceMat(name)});}
-   if(!items.length||blocks.length!==1)return;
-   const block=blocks[0], jf=familyForJobBalance(jobCode)||(classify(jobCode,job(jobCode).DESCRIPTION||'')==='WDC'?'WDC':null); if(!jf)return;
+   if(!items.length)return;
+   const sicRowsForKey=(d.sic||[]).filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===key && clean(x.BLOKCODE));
+   const p4ByBlock={}; sicRowsForKey.forEach(x=>{const b=clean(x.BLOKCODE),p=num(x.P4);if(p>0)p4ByBlock[b]=(p4ByBlock[b]||0)+p});
+   const targetBlocks=blocks.length?blocks:Object.keys(p4ByBlock),totalP4=targetBlocks.reduce((a,b)=>a+(p4ByBlock[b]||0),0);
+   if(!targetBlocks.length||totalP4<=0)return;
+   const jf=familyForJobBalance(jobCode)||(classify(jobCode,job(jobCode).DESCRIPTION||'')==='WDC'?'WDC':null); if(!jf)return;
    const matSet=[...new Set(items.map(x=>x.canonical))], allowed=jf==='CWC'?['CWC1','CWC2','CWC3','CWC4']:jf==='PTC'?['PTC1','PTC2','PTC3','PTC4']:['WDC1','WDC2','WDC3','WDC4'];
-   const candidates=allowed.filter(type=>{const bs=new Set((d.prescriptionByBlock?.[[block,type].join('|')]?.items||[]).map(x=>normBalanceMat(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
-   const subtype=candidates.length===1?subtypeOfType(candidates[0]):''; const reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC';
-   items.forEach(it=>{const k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=it.qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,subtype,material:it.material,canonical:it.canonical,qty:it.qty,uom:it.uom,jobs:new Set([jobCode]),date});});
+   targetBlocks.forEach(block=>{
+     const share=(p4ByBlock[block]||0)/totalP4;
+     const candidates=allowed.filter(type=>{const bs=new Set((d.prescriptionByBlock?.[[block,type].join('|')]?.items||[]).map(x=>normBalanceMat(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
+     const subtype=candidates.length===1?subtypeOfType(candidates[0]):''; const reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC';
+     items.forEach(it=>{const qty=it.qty*share,k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,subtype,material:it.material,canonical:it.canonical,qty,uom:it.uom,jobs:new Set([jobCode]),date});});
+   });
  });
 
  // ENGINE 06: preserve Excel CWC1..4 and PTC1..4 internally, then pair them into CPT.
