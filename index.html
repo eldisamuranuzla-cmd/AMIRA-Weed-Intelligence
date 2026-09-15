@@ -356,7 +356,7 @@ function monthlyDownload(rows,afRows,bounds,umk,days,afd){
 async function renderMonthly(){
  const sel=$('monthlyPeriodFilter'),afdSel=$('monthlyAfdelingFilter');if(!sel)return;
  if(!sel.options.length)monthlyPeriodOptions().forEach(p=>{const o=document.createElement('option');o.value=p.key;o.textContent=p.label;sel.appendChild(o)});
- if(!sel.value)sel.value='2026-09';const mpb=$('monthlyPeriodPickerBtn');if(mpb&&sel.options.length){const mo=sel.options[sel.selectedIndex];mpb.textContent=mo?.textContent||'Pilih periode';}
+ if(!sel.value)sel.value=monthlyPeriodOptions()[0]?.key||'2026-09';const mpb=$('monthlyPeriodPickerBtn');if(mpb){const pp=monthlyPeriodOptions().find(p=>p.key===sel.value)||monthlyPeriodOptions()[0];mpb.textContent=pp?.label||'Pilih periode';}
  if(afdSel&&!afdSel.options.length)AMIRA_AFDELING_OPTIONS.forEach(a=>{const o=document.createElement('option');o.value=a;o.textContent=a;afdSel.appendChild(o)});
  const bounds=monthlyPeriodBounds(sel.value);if(!bounds)return;
  const afd=afdSel?.value||'',umk=Math.max(0,num($('monthlyUmk')?.value)||3909005),days=Math.max(1,Math.min(31,Math.round(num($('monthlyWorkDays')?.value)||25))),hkRate=umk/days;
@@ -378,16 +378,35 @@ function initMonthly(){
  ['monthlyPeriodFilter','monthlyAfdelingFilter','monthlyUmk','monthlyWorkDays'].forEach(id=>{$(id)?.addEventListener('change',rer);$(id)?.addEventListener('input',rer)});
  const sel=$('monthlyPeriodFilter'),picker=$('monthlyPeriodPicker'),btn=$('monthlyPeriodPickerBtn'),menu=$('monthlyPeriodPickerMenu');
  if(sel&&picker&&btn&&menu){
+   const options=monthlyPeriodOptions();
+   // Keep the native select as the engine value, but build the visible Android-safe picker directly from period objects.
+   sel.innerHTML='';
+   options.forEach(p=>{const o=document.createElement('option');o.value=p.key;o.textContent=p.label;sel.appendChild(o)});
+   if(!sel.value)sel.value=options[0]?.key||'2026-09';
+   const syncButton=()=>{const p=options.find(x=>x.key===sel.value)||options[0];btn.textContent=p?.label||'Pilih periode';};
    const buildPicker=()=>{
      menu.innerHTML='';
-     [...sel.options].forEach(o=>{const b=document.createElement('button');b.type='button';b.className='mp-option'+(o.value===sel.value?' active':'');b.textContent=o.textContent;b.dataset.value=o.value;b.addEventListener('click',()=>{sel.value=o.value;picker.classList.remove('open');btn.textContent=o.textContent;sel.dispatchEvent(new Event('change',{bubbles:true}))});menu.appendChild(b)});
-     const cur=sel.options[sel.selectedIndex];btn.textContent=cur?.textContent||'Pilih periode';
+     options.forEach(p=>{
+       const b=document.createElement('button');
+       b.type='button';b.className='mp-option'+(p.key===sel.value?' active':'');
+       b.textContent=p.label;b.dataset.value=p.key;
+       b.addEventListener('click',()=>{
+         sel.value=p.key;picker.classList.remove('open');syncButton();
+         sel.dispatchEvent(new Event('change',{bubbles:true}));
+       });
+       menu.appendChild(b);
+     });
+     syncButton();
    };
-   btn.addEventListener('click',()=>{buildPicker();picker.classList.toggle('open')});
+   btn.addEventListener('click',e=>{e.preventDefault();buildPicker();picker.classList.toggle('open')});
    document.addEventListener('click',e=>{if(!picker.contains(e.target))picker.classList.remove('open')});
-   const observer=new MutationObserver(buildPicker);observer.observe(sel,{childList:true});
+   syncButton();
  }
- $('monthlyDownloadBtn')?.addEventListener('click',()=>{const m=window.__amiraMonthly;if(!m)return;monthlyDownload(m.blocks,m.afRows,m.bounds,m.umk,m.days,m.afd)});
+ $('monthlyDownloadBtn')?.addEventListener('click',()=>{
+   const m=window.__amiraMonthly;
+   if(!m||!m.bounds||!m.bounds.start||!m.bounds.end){alert('Pilih Periode Buku terlebih dahulu.');return;}
+   monthlyDownload(m.blocks||[],m.afRows||[],m.bounds,m.umk,m.days,m.afd);
+ });
  rer();
 }
 async function switchMainAfdeling(afd){afd=afdelingLabel(afd);if(!afd||afd==='MULTI')return;const snaps=await allSnaps();const candidates=snaps.filter(s=>afdelingLabel(snapAfdeling(s))===afd).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.lockedAt||'').localeCompare(String(a.lockedAt||'')));const currentDraft=state.dataset.status==='DRAFT'&&state.files.length;if(currentDraft){alert('Selesaikan atau jangan ubah dataset DRAFT aktif sebelum berpindah afdeling.');const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}if(!candidates[0]){alert(`Belum ada historical dataset untuk ${afd}. Upload dan LOCK dataset ${afd} terlebih dahulu.`);const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}await loadSnap(candidates[0]);}
