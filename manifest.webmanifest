@@ -1,0 +1,25 @@
+{
+  "name": "AMIRA V24 — Material Balance Block Fix",
+  "short_name": "AMIRA",
+  "description": "Afdeling Material & Rawat Intelligence",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f8f7",
+  "theme_color": "#0b5d3b",
+  "icons": [
+    {
+      "src": "./astra-agro-logo-compact.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./astra-agro-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
