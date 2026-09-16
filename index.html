@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AMIRA V52 — Dashboard Master Logic + Base Racun Fix</title>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AMIRA V52 — V45 Historical Base + V52 Logic</title>
 <style>
 :root{--g:#005844;--g2:#087c65;--g3:#e6f3ed;--ink:#163b35;--muted:#71857f;--line:#dfeae6;--bg:#f3f7f5;--white:#fff;--warn:#9a6500;--red:#b23a2d}
 *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}button,select,input{font:inherit}.app{display:flex;min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:linear-gradient(180deg,#004f42,#003f35);color:#fff;padding:18px 12px;overflow:auto}.brand{padding:4px 8px 18px;border-bottom:1px solid #ffffff16}.brand img{width:165px;height:56px;object-fit:contain;object-position:left center;filter:brightness(0) invert(1);opacity:.96}.brand strong{display:block;font-size:23px;letter-spacing:.3px}.brand small{opacity:.72;font-size:10px}.nav{display:grid;gap:4px;margin-top:16px}.nav button{border:0;background:transparent;color:#eaf8f2;text-align:left;padding:10px 11px;border-radius:8px;cursor:pointer;font-size:12px}.nav button:hover,.nav button.active{background:#087c65}.nav button span{margin-left:7px}.sidefoot{position:sticky;margin-top:35px;bottom:0;font-size:10px;line-height:1.5;opacity:.72;padding:8px}
@@ -74,7 +74,96 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <footer class="footer">AMIRA v47 · Engine 05 Actual → Engine 06 Base → Engine 07 Balance · 5 Afdeling · CWM Fix · Fertilizer Item · Static GitHub Pages application</footer>
 </div></main></div>
 <input id="masterInput" type="file" accept=".csv,text/csv" hidden><input id="rawatInput" type="file" accept=".csv,text/csv" multiple hidden>
-<script>
+<script>function multiWorkstream(code,desc,ws){const c=clean(code),n=String(desc||'').toUpperCase();if(/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|NPK/.test(n))return'PEMUPUKAN';if(c==='240101'||/PRUNING|POTONG\s+PELEPAH|PELEPAH/.test(n))return'PRUNING';if(c==='220101'||/CW\s*MANU(?:AL)?|CIRCLE\s*WEEDING\s*MANUAL|\bCWM\b/.test(n))return'CWM';return ws||classify(c,desc||'')} function downloadMultiJobRows(){
+ const rows=multiAfdelingState.rows||[];
+ const sel=$('multiJobFilter')?.value||'';
+ const name=sel?`AMIRA_MultiAfdeling_${sel}_${new Date().toISOString().slice(0,10)}.csv`:`AMIRA_MultiAfdeling_All_${new Date().toISOString().slice(0,10)}.csv`;
+ const header=['SITE','AFDELING','BLOK','HA HESTI','CPT','CWM','WDC','WDM','PRUNING','PUPUK','OTHER','TOTAL HA','COVERAGE %','HARI AKTIF'];
+ const body=rows.map(r=>[
+   r.site,r.afdeling,r.block,r.ha,r.cpt,r.cwm,r.wdc,r.wdm,r.pruning,r.pemupukan,r.other,r.total,
+   r.ha?(100*r.total/r.ha):0,r.days
+ ]);
+ const csv=toExcelCsv([header,...body]);
+ downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8;'}),name);
+} function dashboardClassifyRow(r){
+ const c=clean(r.JOBCODE),j=job(c)||{};
+ const desc=String(j.DESCRIPTION||r.JOBNAME||r.JOB||'').toUpperCase().trim();
+ const cgp=String(j.CGP||'').toUpperCase().trim();
+ if(c==='220101'||cgp==='CWM'||/CIRCLE\s*WEEDING\s*MANUAL|\bCW\s*MANU(?:AL)?\b/.test(desc))return'CWM';
+ if(c==='240101'||cgp==='PRUNING'||/\bPRUNING\b|POTONG\s+PELEPAH|PELEPAH/.test(desc))return'PRUNING';
+ if(cgp==='PUPUK'||/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|\bNPK\b/.test(desc))return'PEMUPUKAN';
+ return classify(c,desc);
+} function dashboardBlockRows(){
+ const d=state.data||buildData(), map=new Map();
+ const ensure=b=>{
+   if(!map.has(b)){
+     const base=d.blockRows.find(x=>x.block===b)||{};
+     map.set(b,{...base,block:b,CPT:0,CWM:0,WDC:0,WDM:0,PRUNING:0,PEMUPUKAN:0,OTHER:0});
+   }
+   return map.get(b);
+ };
+ (d.sic||[]).forEach(r=>{
+   const b=clean(r.BLOKCODE), p=num(r.P4), w=dashboardClassifyRow(r);
+   if(!b||p<=0)return;
+   const x=ensure(b);
+   if(x[w]!==undefined)x[w]+=p;
+ });
+ return [...map.values()].map(x=>({...x,
+   HK:x.HK||0,
+   Racun:x.Racun||0,
+   haTanam:x.haTanam||0,
+   maxCoverage:x.maxCoverage||0
+ }));
+} function baseMaterialSpec(block,type,material,uom){
+ const target=normMat(material);
+ const list=(baseTypeItems(block,type)||[]);
+ const matches=list.filter(x=>normMat(x.material)===target);
+ if(!matches.length)return null;
+ const gram=x=>/GR|GRAM|G\b/.test(String(x.uom||'').toUpperCase());
+
+ // Prescription per block/type is authoritative. Prevent METIL/gram from
+ // accidentally taking a liquid price.
+ if(matches.length===1)return matches[0];
+ if(target==='METIL'||target==='METHIL'||target==='METHYL'){
+   const g=matches.find(x=>gram(x));
+   if(g)return g;
+ }
+ const input=String(uom||'').toUpperCase().trim();
+ if(input){
+   const wantGram=/GR|GRAM|G\b/.test(input);
+   const exact=matches.find(x=>gram(x)===wantGram);
+   if(exact)return exact;
+ }
+ return matches[0];
+} function actualMaterialCostSpec(a){
+ const code=clean(a.code||a.materialCode||'');
+ const masterMat=mat(code)||{};
+ const material=(code==='M0101'?'GLYPHOSATE':
+                 code==='M0103'?'METIL':
+                 (masterMat.DESCRIPTION||a.displayMaterial||a.material||''));
+ const type=clean(a.type);
+
+ // Amanda material code is authoritative for UOM.
+ // M0101 = liquid/litre; M0103 = Methil/gram.
+ const forcedUom=code==='M0101'?'L':code==='M0103'?'GR':
+   String(masterMat.UOM||a.uom||'').toUpperCase().trim();
+
+ let spec=baseMaterialSpec(a.block,type,material,forcedUom);
+ if(!spec)spec=dailyBasePrice(a.block,material,forcedUom,type);
+
+ // If prescription lookup exists, preserve its price but force the transaction UOM.
+ if(spec){
+   return {
+     uom:code==='M0101'?'L':code==='M0103'?'GR':String(spec.uom||forcedUom||'').toUpperCase(),
+     price:num(spec.price),
+     material:spec.material||material,
+     product:spec.product||'',
+     code
+   };
+ }
+ // No arbitrary transaction-price fallback.
+ return null;
+} 
 (()=>{
 const $=id=>document.getElementById(id), fmt=n=>Number(n||0).toLocaleString('id-ID',{maximumFractionDigits:2}), num=v=>{const x=parseFloat(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:0}, clean=v=>String(v??'').trim(), pct=(a,b)=>b?Math.round(a/b*100):0;
 const WS=['CPT','CWM','WDC','WDM','OTHER'];
@@ -248,28 +337,6 @@ async function uploadRaw(files){if(!files?.length)return;if(files.length>4)throw
 function updateControl(){const locked=state.dataset.status==='LOCKED'||state.dataset.locked;const st=$('datasetStatus'),meta=$('datasetMeta');st.textContent=locked?'LOCKED':'DRAFT';st.className='status '+(locked?'locked':'draft');meta.textContent=state.dataset.date?`Tanggal ${state.dataset.date} · ${state.files.length} file · maksimal 4 file Rawat · history lokal + cloud jika dikonfigurasi`: 'Maksimal 4 file per dataset/afdeling · minimal 1 file untuk LOCKED · semua tanggal harus sama · history dipisahkan date + afdeling';$('lockBtn').disabled=locked||!state.files.length;$('lockBtn2').disabled=locked||!state.files.length;$('reopenBtn').style.display=locked?'inline-block':'none';const d=state.data||buildData();$('recon').innerHTML=state.files.length?`Tanggal <b>${state.dataset.date}</b> · EMPATT ${d.emp.length} · valid ${d.valid.length} · PLANHARIAN ${d.planCount} · T_SIC ${d.sicCount} · T_MATERIAL ${d.materialRows} · GPS ${d.gps.length}`:'Belum ada dataset staged.';}
 function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${s.files?.length||0} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
 async function lock(){if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);const d=state.data||buildData();if(!state.dataset.date)state.dataset.date=d.date;if(!state.dataset.date)throw new Error('Tanggal dataset belum terbaca.');const afd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');if(!AMIRA_AFDELING_OPTIONS.includes(afd))throw new Error(`Dataset harus tepat 1 afdeling (${AMIRA_AFDELING_OPTIONS.join(', ')}). Terdeteksi: ${afd||'—'}`);state.dataset={...state.dataset,status:'LOCKED',locked:true,afdeling:afd,id:`AMIRA-${state.dataset.date}-${afd}`};await saveSnapshotByDate(await snapshot());renderAll();}
-function baseMaterialSpec(block,type,material,uom){
- const target=normMat(material);
- const list=(baseTypeItems(block,type)||[]);
- const matches=list.filter(x=>normMat(x.material)===target);
- if(!matches.length)return null;
- const gram=x=>/GR|GRAM|G\b/.test(String(x.uom||'').toUpperCase());
-
- // Prescription per block/type is authoritative. Prevent METIL/gram from
- // accidentally taking a liquid price.
- if(matches.length===1)return matches[0];
- if(target==='METIL'||target==='METHIL'||target==='METHYL'){
-   const g=matches.find(x=>gram(x));
-   if(g)return g;
- }
- const input=String(uom||'').toUpperCase().trim();
- if(input){
-   const wantGram=/GR|GRAM|G\b/.test(input);
-   const exact=matches.find(x=>gram(x)===wantGram);
-   if(exact)return exact;
- }
- return matches[0];
-}
 function dailyBasePrice(block,material,uom,type){
  const target=normMat(material);
  const spec=baseMaterialSpec(block,type,material,uom);
@@ -288,35 +355,6 @@ function dailyBasePrice(block,material,uom,type){
    if(exact)return exact;
  }
  return candidates[0];
-}
-function actualMaterialCostSpec(a){
- const code=clean(a.code||a.materialCode||'');
- const masterMat=mat(code)||{};
- const material=(code==='M0101'?'GLYPHOSATE':
-                 code==='M0103'?'METIL':
-                 (masterMat.DESCRIPTION||a.displayMaterial||a.material||''));
- const type=clean(a.type);
-
- // Amanda material code is authoritative for UOM.
- // M0101 = liquid/litre; M0103 = Methil/gram.
- const forcedUom=code==='M0101'?'L':code==='M0103'?'GR':
-   String(masterMat.UOM||a.uom||'').toUpperCase().trim();
-
- let spec=baseMaterialSpec(a.block,type,material,forcedUom);
- if(!spec)spec=dailyBasePrice(a.block,material,forcedUom,type);
-
- // If prescription lookup exists, preserve its price but force the transaction UOM.
- if(spec){
-   return {
-     uom:code==='M0101'?'L':code==='M0103'?'GR':String(spec.uom||forcedUom||'').toUpperCase(),
-     price:num(spec.price),
-     material:spec.material||material,
-     product:spec.product||'',
-     code
-   };
- }
- // No arbitrary transaction-price fallback.
- return null;
 }
 function monthlyBasePrice(block,material,uom,type){return dailyBasePrice(block,material,uom,type);}
 function dailyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');const s=String(v);return `"${s.replace(/"/g,'""')}"`;}
@@ -360,23 +398,9 @@ function itemHKRows(){const d=state.data||buildData();return (d.itemHK||[]).slic
 function overallHKByBlock(block){const d=state.data||buildData();const s=new Set();(d.workerItemRows||[]).forEach(x=>{if(x.b===block)s.add(x.worker)});return s.size}
 
 let multiAfdelingState={site:'',afdeling:'',period:'',basis:'HESTI',rows:[]};
-function multiWorkstream(code,desc,ws){const c=clean(code),n=String(desc||'').toUpperCase();if(/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|NPK/.test(n))return'PEMUPUKAN';if(c==='240101'||/PRUNING|POTONG\s+PELEPAH|PELEPAH/.test(n))return'PRUNING';if(c==='220101'||/CW\s*MANU(?:AL)?|CIRCLE\s*WEEDING\s*MANUAL|\bCWM\b/.test(n))return'CWM';return ws||classify(c,desc||'')}
 function aggregateSicRows(rows, sourceDate){const sic=dedupRows(rows||[]),workerMap={};sic.forEach(r=>{const c=clean(r.JOBCODE),j=job(c),desc=j.DESCRIPTION||r.JOBNAME||r.JOB||'',w=multiWorkstream(c,desc,classify(c,desc)),b=clean(r.BLOKCODE)||'—',d=normDate(r.TANGGAL||r.DATE)||sourceDate||'',m=clean(r.MANDORCODE),worker=clean(r.EMPNO||r.EMPCODE||r.NAMA)||'UNKNOWN',ha=num(r.P4);if(!ha||!b||b==='—')return;const k=[d,b,c,m,worker].join('|');workerMap[k]??={date:d,block:b,code:c,ws:w,desc:String(desc||''),worker,ha:0};workerMap[k].ha+=ha});return Object.values(workerMap)}
 async function historicalWorkRows(){const snaps=await allSnaps(),all=[],activeId=String(state.dataset.id||'');const firstByAfd={};for(const s of snaps){const afd=afdelingLabel(s.afdeling||snapAfdeling(s)||''),d=String(s.date||'').slice(0,10);if(AMIRA_AFDELING_OPTIONS.includes(afd)&&d&&(!firstByAfd[afd]||d<firstByAfd[afd]))firstByAfd[afd]=d}for(const s of snaps){if(activeId&&String(s.id)===activeId)continue;const date=String(s.date||'').slice(0,10);if(!date)continue;const afd=afdelingLabel(s.afdeling||snapAfdeling(s)||'');if(AMIRA_AFDELING_OPTIONS.includes(afd)&&firstByAfd[afd]&&date<firstByAfd[afd])continue;const sic=[];for(const f of(s.files||[])){try{const raw=await rawText(f.raw),p=parseAmanda(raw);sic.push(...(p.sections?.T_SIC||[]))}catch(e){}}all.push(...aggregateSicRows(sic,date))}const activeDate=String(state.dataset.date||'').slice(0,10);if(activeDate)all.push(...aggregateSicRows(state.sections.T_SIC||[],activeDate));return all}
 function multiRowsFromItems(items){const map={};HESTI_JUNI_2026.forEach(h=>{const b=String(h.block).trim().toUpperCase(),a=afdelingLabel(afdelingOfBlock(b)),site=h.site||'SYM1',k=[site,a,b].join('|');map[k]={site,afdeling:a,block:b,cwc:0,cwm:0,path:0,tph:0,cpt:0,wdc:0,wdm:0,pruning:0,pemupukan:0,other:0,total:0,dates:new Set()}});items.forEach(x=>{const b=x.block,a=afdelingLabel(afdelingOfBlock(b)),site=siteOfBlock(b),k=[site,a,b].join('|');map[k]??={site,afdeling:a,block:b,cwc:0,cwm:0,path:0,tph:0,cpt:0,wdc:0,wdm:0,pruning:0,pemupukan:0,other:0,total:0,dates:new Set()};const q=x.ha||0,code=x.code,ws=multiWorkstream(code,x.desc,x.ws);if(['220601','220602'].includes(code))map[k].cwc+=q;else if(['220401','220402'].includes(code))map[k].path+=q;else if(code==='220503')map[k].tph+=q;else if(ws==='CWM')map[k].cwm+=q;else if(ws==='WDC')map[k].wdc+=q;else if(ws==='WDM')map[k].wdm+=q;else if(ws==='PRUNING')map[k].pruning+=q;else if(ws==='PEMUPUKAN')map[k].pemupukan+=q;else map[k].other+=q;map[k].dates.add(x.date)});return Object.values(map).map(r=>{r.cpt=r.cwc+r.path+r.tph;r.total=r.cpt+r.cwm+r.wdc+r.wdm+r.pruning+r.pemupukan+r.other;r.ha=hestiHa(r.block,multiAfdelingState.basis)||num(state.fields.get(r.block)?.HECTPLANTED);r.coverage=r.ha?100*r.total/r.ha:0;r.days=r.dates.size;return r})}
-
-function downloadMultiJobRows(){
- const rows=multiAfdelingState.rows||[];
- const sel=$('multiJobFilter')?.value||'';
- const name=sel?`AMIRA_MultiAfdeling_${sel}_${new Date().toISOString().slice(0,10)}.csv`:`AMIRA_MultiAfdeling_All_${new Date().toISOString().slice(0,10)}.csv`;
- const header=['SITE','AFDELING','BLOK','HA HESTI','CPT','CWM','WDC','WDM','PRUNING','PUPUK','OTHER','TOTAL HA','COVERAGE %','HARI AKTIF'];
- const body=rows.map(r=>[
-   r.site,r.afdeling,r.block,r.ha,r.cpt,r.cwm,r.wdc,r.wdm,r.pruning,r.pemupukan,r.other,r.total,
-   r.ha?(100*r.total/r.ha):0,r.days
- ]);
- const csv=toExcelCsv([header,...body]);
- downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8;'}),name);
-}
 async function renderMultiAfdeling(){
  const items=await historicalWorkRows();
  let rows=multiRowsFromItems(items);
@@ -722,17 +746,6 @@ function initMonthly(){
 }
 async function switchMainAfdeling(afd){afd=afdelingLabel(afd);if(!afd||afd==='MULTI')return;const snaps=await allSnaps();const candidates=snaps.filter(s=>afdelingLabel(snapAfdeling(s))===afd).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.lockedAt||'').localeCompare(String(a.lockedAt||'')));const currentDraft=state.dataset.status==='DRAFT'&&state.files.length;if(currentDraft){alert('Selesaikan atau jangan ubah dataset DRAFT aktif sebelum berpindah afdeling.');const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}if(!candidates[0]){alert(`Belum ada historical dataset untuk ${afd}. Upload dan LOCK dataset ${afd} terlebih dahulu.`);const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}await loadSnap(candidates[0]);}
 function initMultiAfdeling(){const rer=()=>{multiAfdelingState.site=$('multiSiteFilter')?.value||'';multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';multiAfdelingState.period=$('multiPeriodFilter')?.value||'';multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';renderMultiAfdeling()};['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiJobFilter','multiHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=rer});['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{multiAfdelingState.basis=$('dashboardHaBasis')?.value||'HESTI';renderMultiAfdeling()}});const mainAf=$('mainAfdelingFilter');if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);$('dashboardMultiReset')?.addEventListener('click',()=>{['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';multiAfdelingState.site='';multiAfdelingState.afdeling='';multiAfdelingState.period='';multiAfdelingState.basis='HESTI';renderMultiAfdeling()});renderMultiAfdeling()}
-
-function dashboardClassifyRow(r){
- const c=clean(r.JOBCODE),j=job(c)||{};
- const desc=String(j.DESCRIPTION||r.JOBNAME||r.JOB||'').toUpperCase().trim();
- const cgp=String(j.CGP||'').toUpperCase().trim();
- if(c==='220101'||cgp==='CWM'||/CIRCLE\s*WEEDING\s*MANUAL|\bCW\s*MANU(?:AL)?\b/.test(desc))return'CWM';
- if(c==='240101'||cgp==='PRUNING'||/\bPRUNING\b|POTONG\s+PELEPAH|PELEPAH/.test(desc))return'PRUNING';
- if(cgp==='PUPUK'||/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|\bNPK\b/.test(desc))return'PEMUPUKAN';
- return classify(c,desc);
-}
-
 function dashboardWorkstreamData(){
  const d=state.data||buildData();
  const ws=['CPT','CWM','WDC','WDM','PRUNING','PEMUPUKAN','OTHER'];
@@ -765,31 +778,6 @@ function dashboardWorkstreamData(){
 
  return out;
 }
-
-function dashboardBlockRows(){
- const d=state.data||buildData(), map=new Map();
- const ensure=b=>{
-   if(!map.has(b)){
-     const base=d.blockRows.find(x=>x.block===b)||{};
-     map.set(b,{...base,block:b,CPT:0,CWM:0,WDC:0,WDM:0,PRUNING:0,PEMUPUKAN:0,OTHER:0});
-   }
-   return map.get(b);
- };
- (d.sic||[]).forEach(r=>{
-   const b=clean(r.BLOKCODE), p=num(r.P4), w=dashboardClassifyRow(r);
-   if(!b||p<=0)return;
-   const x=ensure(b);
-   if(x[w]!==undefined)x[w]+=p;
- });
- return [...map.values()].map(x=>({...x,
-   HK:x.HK||0,
-   Racun:x.Racun||0,
-   haTanam:x.haTanam||0,
-   maxCoverage:x.maxCoverage||0
- }));
-}
-
-
 
 function renderDashboard(){
  let d=state.data||buildData();
@@ -853,7 +841,6 @@ function renderDashboard(){
 
  $('ePhoto').textContent=fmt(d.photos);$('eGps').textContent=fmt(d.gps.length);$('eNo').textContent=fmt(Math.max(0,d.valid.length-d.photos));$('ePct').textContent=d.valid.length?fmt(pct(d.photos,d.valid.length))+'%':'0%';
 }
-
 function renderPages(){let d=state.data||buildData();const workerItemHa=new Map();(d.workerItemRows||[]).forEach(z=>{const k=[z.date,z.b,z.code].join('|');workerItemHa.set(k,(workerItemHa.get(k)||0)+z.ha)});$('executionTable').innerHTML=d.valid.length?d.valid.map(r=>`<tr><td>${r.ATTTIME||r.S_TIME||'—'}</td><td>${r.NAMA||r.EMPNO||'—'}</td><td>${r.JOBCODE}</td><td>${r._ws}</td><td>${r.BLOKCODE||'—'}</td><td>${(r.LAT||r.S_LAT)&& (r.LONG||r.S_LONG)?'✓':'—'}</td><td>${clean(r.PHOTO_PATH)||clean(r.PHOTO_PATH2)?'✓':'—'}</td></tr>`).join(''):`<tr><td colspan="7" class="empty">Belum ada data.</td></tr>`;
  WS.forEach(w=>{let x=workData(w),el=$('page-'+(w==='OTHER'?'other':w.toLowerCase()));el.innerHTML=`<div class="eyebrow">WORKSTREAM</div><div class="detailTitle">${w==='OTHER'?'PRUNING / OTHER':w}</div><div class="meta">Detail aktual dari dataset aktif · klik menu lain untuk berpindah engine.</div><div class="detailKpis"><div class="detailKpi"><small>Luas</small><b>${fmt(x.ha)} Ha</b></div><div class="detailKpi"><small>Blok</small><b>${fmt(x.blocks)}</b></div><div class="detailKpi"><small>HK / Worker</small><b>${fmt(x.hk)}</b></div><div class="detailKpi"><small>Racun</small><b>${fmt(x.racun)} L</b></div></div><div class="card"><div class="head"><h3>Realisasi per Blok</h3><span>${w}</span></div><table><thead><tr><th>Blok</th><th>Ha</th><th>Worker</th><th>Racun L</th></tr></thead><tbody>${d.blockRows.filter(r=>r[w]>0).map(r=>`<tr><td>${r.block}</td><td>${fmt(r[w])}</td><td>${fmt(r.HKWS?.[w]?.size||0)}</td><td>${(r.RacunWS?.[w]||0)>0?fmt(r.RacunWS[w]):'—'}</td></tr>`).join('')||`<tr><td colspan="4" class="empty">Tidak ada transaksi ${w==='OTHER'?'PRUNING / OTHER':w}.</td></tr>`}</tbody></table></div><div class="card" style="margin-top:10px"><div class="head"><h3>HK per Item</h3><span>1 worker = 1 HK pada item</span></div><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Blok</th><th>Item</th><th>HK</th><th>Ha</th><th>Ha/HK</th></tr></thead><tbody>${itemHKRows().filter(x=>x.ws===w).map(x=>{const ha=(workerItemHa.get([x.date,x.block,x.code].join('|'))||0);return`<tr><td>${x.date}</td><td>${x.block}</td><td>${itemName(x.code)}</td><td>${fmt(x.hk)}</td><td>${fmt(ha)}</td><td>${x.hk?fmt(ha/x.hk):'—'}</td></tr>`}).join('')||`<tr><td colspan="6" class="empty">Tidak ada item ${w==='OTHER'?'PRUNING / OTHER':w}.</td></tr>`}</tbody></table></div></div>`});
  const normBalanceMat=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','METHYL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return alias[n]||n};
@@ -1064,8 +1051,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  const b=document.getElementById('multiJobDownloadBtn');
  if(b)b.addEventListener('click',downloadMultiJobRows);
 });
-</script>
-<script>
+</script><script>
 document.addEventListener('change',(e)=>{
  if(e.target?.id==='dashboardAfdelingFilter'){
    const m=document.getElementById('multiAfdelingFilter');
@@ -1077,4 +1063,3 @@ document.addEventListener('change',(e)=>{
  }
 });
 </script>
-</body></html>
