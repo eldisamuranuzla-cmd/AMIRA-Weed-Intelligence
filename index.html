@@ -306,7 +306,28 @@ function multiRowsFromItems(items){const map={};
 }
 function multiDailyRowsFromItems(items,date){const filtered=items.filter(x=>x.date===date);return multiRowsFromItems(filtered).filter(r=>r.total>0)}
 function multiEscCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');return '"'+String(v).replace(/"/g,'""')+'"'}
-function multiDownload(rows,filename,title,mode){if(!rows.length){alert('Belum ada data untuk laporan ini.');return}const lines=[];lines.push([title,'Tanggal',mode.date||'—','Periode Akumulasi',mode.start?`${mode.start} s/d ${mode.end}`:'—'].map(multiEscCell).join(';'));lines.push(['Site','Afdeling','Blok','Ha HeStI','CPT','CWM','WDC','WDM','Pruning','Pupuk','Other','Total Pekerjaan','Coverage','Hari Aktif'].map(multiEscCell).join(';'));rows.forEach(r=>lines.push([r.site,r.afdeling,r.block,r.ha,r.cpt,r.cwm,r.wdc,r.wdm,r.pruning,r.pupuk,r.other,r.total,r.coverage,r.days].map(multiEscCell).join(';')));const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+async function multiDownload(rows,filename,title,mode){
+ if(!rows.length){alert('Belum ada data untuk laporan ini.');return}
+ const lines=[];
+ lines.push([title,'Tanggal',mode.date||'—','Periode Akumulasi',mode.start?`${mode.start} s/d ${mode.end}`:'—'].map(multiEscCell).join(';'));
+ lines.push(['Site','Afdeling','Blok','Ha HeStI','CPT','CWM','WDC','WDM','Pruning','Pupuk','Other','Total Pekerjaan','Coverage','Hari Aktif'].map(multiEscCell).join(';'));
+ rows.forEach(r=>lines.push([r.site,r.afdeling,r.block,r.ha,r.cpt,r.cwm,r.wdc,r.wdm,r.pruning,r.pupuk,r.other,r.total,r.coverage,r.days].map(multiEscCell).join(';')));
+ const csv='\ufeff'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+ const safeName=String(filename||'AMIRA_Multi_Afdeling.csv').replace(/[\\/:*?"<>|]/g,'_');
+ try{
+   if(window.showSaveFilePicker){
+     const handle=await window.showSaveFilePicker({suggestedName:safeName,types:[{description:'CSV',accept:{'text/csv':['.csv']}}]});
+     const writable=await handle.createWritable();await writable.write(csv);await writable.close();return;
+   }
+ }catch(e){if(e&&e.name==='AbortError')return;console.warn('Save picker fallback',e)}
+ const url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=safeName;a.rel='noopener';a.style.display='none';document.body.appendChild(a);
+ try{a.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}))}catch(e){try{a.click()}catch(_){}}
+ a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),10000);
+ // Mobile/PWA fallback: expose the CSV in a new tab when the download manager does not accept blob downloads.
+ setTimeout(()=>{try{if(document.visibilityState!=='hidden'){const w=window.open(url,'_blank','noopener');if(!w)window.location.href=url;}}catch(e){}},350);
+}
 async function renderMultiAfdeling(){
  const items=await historicalWorkRows(),month=multiCurrentMonthKey();if(!items.length){multiAfdelingState.monthStart='';multiAfdelingState.monthEnd='';}
  const dates=[...new Set(items.map(x=>x.date).filter(Boolean))].sort(),monthStart=dates[0]||'',monthEnd=dates[dates.length-1]||'';multiAfdelingState.monthStart=monthStart;multiAfdelingState.monthEnd=monthEnd;
