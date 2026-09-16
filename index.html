@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AMIRA V52 — V45 Historical Base + V52 Logic</title>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AMIRA V52 — V45 Historical Base</title>
 <style>
 :root{--g:#005844;--g2:#087c65;--g3:#e6f3ed;--ink:#163b35;--muted:#71857f;--line:#dfeae6;--bg:#f3f7f5;--white:#fff;--warn:#9a6500;--red:#b23a2d}
 *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}button,select,input{font:inherit}.app{display:flex;min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:linear-gradient(180deg,#004f42,#003f35);color:#fff;padding:18px 12px;overflow:auto}.brand{padding:4px 8px 18px;border-bottom:1px solid #ffffff16}.brand img{width:165px;height:56px;object-fit:contain;object-position:left center;filter:brightness(0) invert(1);opacity:.96}.brand strong{display:block;font-size:23px;letter-spacing:.3px}.brand small{opacity:.72;font-size:10px}.nav{display:grid;gap:4px;margin-top:16px}.nav button{border:0;background:transparent;color:#eaf8f2;text-align:left;padding:10px 11px;border-radius:8px;cursor:pointer;font-size:12px}.nav button:hover,.nav button.active{background:#087c65}.nav button span{margin-left:7px}.sidefoot{position:sticky;margin-top:35px;bottom:0;font-size:10px;line-height:1.5;opacity:.72;padding:8px}
@@ -74,7 +74,7 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <footer class="footer">AMIRA v47 · Engine 05 Actual → Engine 06 Base → Engine 07 Balance · 5 Afdeling · CWM Fix · Fertilizer Item · Static GitHub Pages application</footer>
 </div></main></div>
 <input id="masterInput" type="file" accept=".csv,text/csv" hidden><input id="rawatInput" type="file" accept=".csv,text/csv" multiple hidden>
-<script>function multiWorkstream(code,desc,ws){const c=clean(code),n=String(desc||'').toUpperCase();if(/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|NPK/.test(n))return'PEMUPUKAN';if(c==='240101'||/PRUNING|POTONG\s+PELEPAH|PELEPAH/.test(n))return'PRUNING';if(c==='220101'||/CW\s*MANU(?:AL)?|CIRCLE\s*WEEDING\s*MANUAL|\bCWM\b/.test(n))return'CWM';return ws||classify(c,desc||'')} function downloadMultiJobRows(){
+<script>function downloadMultiJobRows(){
  const rows=multiAfdelingState.rows||[];
  const sel=$('multiJobFilter')?.value||'';
  const name=sel?`AMIRA_MultiAfdeling_${sel}_${new Date().toISOString().slice(0,10)}.csv`:`AMIRA_MultiAfdeling_All_${new Date().toISOString().slice(0,10)}.csv`;
@@ -85,85 +85,8 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
  ]);
  const csv=toExcelCsv([header,...body]);
  downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8;'}),name);
-} function dashboardClassifyRow(r){
- const c=clean(r.JOBCODE),j=job(c)||{};
- const desc=String(j.DESCRIPTION||r.JOBNAME||r.JOB||'').toUpperCase().trim();
- const cgp=String(j.CGP||'').toUpperCase().trim();
- if(c==='220101'||cgp==='CWM'||/CIRCLE\s*WEEDING\s*MANUAL|\bCW\s*MANU(?:AL)?\b/.test(desc))return'CWM';
- if(c==='240101'||cgp==='PRUNING'||/\bPRUNING\b|POTONG\s+PELEPAH|PELEPAH/.test(desc))return'PRUNING';
- if(cgp==='PUPUK'||/PEMUPUKAN|PUPUK|FERTILIZER|FERTILISER|APLIKASI\s+PUPUK|\bNPK\b/.test(desc))return'PEMUPUKAN';
- return classify(c,desc);
-} function dashboardBlockRows(){
- const d=state.data||buildData(), map=new Map();
- const ensure=b=>{
-   if(!map.has(b)){
-     const base=d.blockRows.find(x=>x.block===b)||{};
-     map.set(b,{...base,block:b,CPT:0,CWM:0,WDC:0,WDM:0,PRUNING:0,PEMUPUKAN:0,OTHER:0});
-   }
-   return map.get(b);
- };
- (d.sic||[]).forEach(r=>{
-   const b=clean(r.BLOKCODE), p=num(r.P4), w=dashboardClassifyRow(r);
-   if(!b||p<=0)return;
-   const x=ensure(b);
-   if(x[w]!==undefined)x[w]+=p;
- });
- return [...map.values()].map(x=>({...x,
-   HK:x.HK||0,
-   Racun:x.Racun||0,
-   haTanam:x.haTanam||0,
-   maxCoverage:x.maxCoverage||0
- }));
-} function baseMaterialSpec(block,type,material,uom){
- const target=normMat(material);
- const list=(baseTypeItems(block,type)||[]);
- const matches=list.filter(x=>normMat(x.material)===target);
- if(!matches.length)return null;
- const gram=x=>/GR|GRAM|G\b/.test(String(x.uom||'').toUpperCase());
+}
 
- // Prescription per block/type is authoritative. Prevent METIL/gram from
- // accidentally taking a liquid price.
- if(matches.length===1)return matches[0];
- if(target==='METIL'||target==='METHIL'||target==='METHYL'){
-   const g=matches.find(x=>gram(x));
-   if(g)return g;
- }
- const input=String(uom||'').toUpperCase().trim();
- if(input){
-   const wantGram=/GR|GRAM|G\b/.test(input);
-   const exact=matches.find(x=>gram(x)===wantGram);
-   if(exact)return exact;
- }
- return matches[0];
-} function actualMaterialCostSpec(a){
- const code=clean(a.code||a.materialCode||'');
- const masterMat=mat(code)||{};
- const material=(code==='M0101'?'GLYPHOSATE':
-                 code==='M0103'?'METIL':
-                 (masterMat.DESCRIPTION||a.displayMaterial||a.material||''));
- const type=clean(a.type);
-
- // Amanda material code is authoritative for UOM.
- // M0101 = liquid/litre; M0103 = Methil/gram.
- const forcedUom=code==='M0101'?'L':code==='M0103'?'GR':
-   String(masterMat.UOM||a.uom||'').toUpperCase().trim();
-
- let spec=baseMaterialSpec(a.block,type,material,forcedUom);
- if(!spec)spec=dailyBasePrice(a.block,material,forcedUom,type);
-
- // If prescription lookup exists, preserve its price but force the transaction UOM.
- if(spec){
-   return {
-     uom:code==='M0101'?'L':code==='M0103'?'GR':String(spec.uom||forcedUom||'').toUpperCase(),
-     price:num(spec.price),
-     material:spec.material||material,
-     product:spec.product||'',
-     code
-   };
- }
- // No arbitrary transaction-price fallback.
- return null;
-} 
 (()=>{
 const $=id=>document.getElementById(id), fmt=n=>Number(n||0).toLocaleString('id-ID',{maximumFractionDigits:2}), num=v=>{const x=parseFloat(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:0}, clean=v=>String(v??'').trim(), pct=(a,b)=>b?Math.round(a/b*100):0;
 const WS=['CPT','CWM','WDC','WDM','OTHER'];
@@ -1051,7 +974,8 @@ document.addEventListener('DOMContentLoaded',()=>{
  const b=document.getElementById('multiJobDownloadBtn');
  if(b)b.addEventListener('click',downloadMultiJobRows);
 });
-</script><script>
+</script>
+<script>
 document.addEventListener('change',(e)=>{
  if(e.target?.id==='dashboardAfdelingFilter'){
    const m=document.getElementById('multiAfdelingFilter');
@@ -1063,3 +987,4 @@ document.addEventListener('change',(e)=>{
  }
 });
 </script>
+</body></html>
