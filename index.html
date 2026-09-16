@@ -306,67 +306,25 @@ function multiRowsFromItems(items){const map={};
 }
 function multiDailyRowsFromItems(items,date){const filtered=items.filter(x=>x.date===date);return multiRowsFromItems(filtered).filter(r=>r.total>0)}
 function multiEscCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');return '"'+String(v).replace(/"/g,'""')+'"'}
-async function multiDownload(rows,filename,title,mode){
+function multiDownload(rows,filename,title,mode){
  if(!rows.length){alert('Belum ada data untuk laporan ini.');return}
  const lines=[];
  lines.push([title,'Tanggal',mode.date||'—','Periode Akumulasi',mode.start?`${mode.start} s/d ${mode.end}`:'—'].map(multiEscCell).join(';'));
  lines.push(['Site','Afdeling','Blok','Ha HeStI','CPT','CWM','WDC','WDM','Pruning','Pupuk','Other','Total Pekerjaan','Coverage','Hari Aktif'].map(multiEscCell).join(';'));
  rows.forEach(r=>lines.push([r.site,r.afdeling,r.block,r.ha,r.cpt,r.cwm,r.wdc,r.wdm,r.pruning,r.pupuk,r.other,r.total,r.coverage,r.days].map(multiEscCell).join(';')));
- const csv='\\ufeff'+lines.join('\\r\\n');
+ const csv='\ufeff'+lines.join('\r\n');
  const safeName=String(filename||'AMIRA_Multi_Afdeling.csv').replace(/[\\/:*?"<>|]/g,'_');
  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
- // Primary mobile-safe path: File System Access API, only where supported.
- if(typeof window.showSaveFilePicker==='function'){
-   try{
-     const handle=await window.showSaveFilePicker({suggestedName:safeName,types:[{description:'CSV',accept:{'text/csv':['.csv']}}]});
-     const writable=await handle.createWritable();
-     await writable.write(blob); await writable.close();
-     return;
-   }catch(e){ if(e?.name==='AbortError') return; console.warn('Save picker failed, using fallback',e); }
- }
- // Direct anchor click — no timeout/window.open, so Android Chrome receives the original user gesture.
- try{
-   const url=URL.createObjectURL(blob);
-   const a=document.createElement('a');
-   a.href=url; a.download=safeName; a.target='_self';
-   a.setAttribute('download',safeName); a.style.position='fixed'; a.style.left='-9999px';
-   document.body.appendChild(a); a.click(); a.remove();
-   setTimeout(()=>URL.revokeObjectURL(url),60000);
-   return;
- }catch(e){ console.warn('Blob download failed',e); }
- // Last-resort Android/share fallback: lets the user save the generated CSV from the system share sheet.
- try{
-   const file=new File([blob],safeName,{type:'text/csv'});
-   if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
-     await navigator.share({title:safeName,files:[file]});
-     return;
-   }
- }catch(e){ if(e?.name==='AbortError')return; console.warn('Share fallback failed',e); }
- // Final fallback: open the CSV as a data URL in the same tab so the report is never lost.
- try{
-   const dataUrl='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
-   const w=window.open(dataUrl,'_blank');
-   if(!w) window.location.href=dataUrl;
- }catch(e){ alert('Browser tidak mengizinkan download CSV. Coba buka AMIRA di Chrome/Edge, bukan browser dalam aplikasi.'); }
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;
+ a.download=safeName;
+ a.style.display='none';
+ document.body.appendChild(a);
+ a.click();
+ a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
-async function renderMultiAfdeling(){
- const items=await historicalWorkRows(),month=multiCurrentMonthKey();if(!items.length){multiAfdelingState.monthStart='';multiAfdelingState.monthEnd='';}
- const dates=[...new Set(items.map(x=>x.date).filter(Boolean))].sort(),monthStart=dates[0]||'',monthEnd=dates[dates.length-1]||'';multiAfdelingState.monthStart=monthStart;multiAfdelingState.monthEnd=monthEnd;
- let rows=multiRowsFromItems(items);const sites=[...new Set([...HESTI_JUNI_2026.map(x=>x.site),...rows.map(r=>r.site)])].filter(Boolean).sort(),afds=[...AMIRA_AFDELING_OPTIONS],periods=dates.slice().reverse(),sf=$('multiSiteFilter'),af=$('multiAfdelingFilter'),pf=$('multiPeriodFilter'),dbaf=$('dashboardAfdelingFilter'),dbs=$('dashboardSiteFilter');
- const fill=(el,vals,placeholder)=>{if(!el)return;const old=el.value;el.innerHTML=`<option value="">${placeholder}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');if(vals.includes(old))el.value=old};fill(sf,sites,'Semua Site');fill(af,afds,'Semua Afdeling');fill(pf,periods,'Pilih tanggal daily');fill(dbs,sites,'Semua Site');fill(dbaf,afds,'Semua Afdeling');
- const mainAf=$('mainAfdelingFilter');if(mainAf){const current=afdelingLabel(state.ui.afdeling||state.dataset.afdeling||'OCYM');mainAf.innerHTML=afds.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');if(afds.includes(current))mainAf.value=current;else if(afds.length)mainAf.value=afds[0];state.ui.afdeling=mainAf.value||current}
- multiAfdelingState.site=sf?.value||'';multiAfdelingState.afdeling=af?.value||'';multiAfdelingState.period=pf?.value||'';multiAfdelingState.basis=$('multiHaBasis')?.value||multiAfdelingState.basis||'HESTI';
- rows=rows.filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling));multiAfdelingState.rows=rows;
- const haTotal=rows.reduce((s,r)=>s+r.ha,0),total=rows.reduce((s,r)=>s+r.total,0),cpt=rows.reduce((s,r)=>s+r.cpt,0),cov=haTotal?100*total/haTotal:0;
- if($('multiKpis'))$('multiKpis').innerHTML=[['Blok',rows.length],['Ha HeStI',fmt(haTotal)],['CPT',fmt(cpt)+' Ha'],['Total Pekerjaan',fmt(total)+' Ha'],['Coverage',fmt(cov)+'%']].map(x=>`<div class="detailKpi"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('');
- if($('multiMonthInfo'))$('multiMonthInfo').innerHTML=monthStart?`Akumulasi bulan berjalan <b>${month}</b> · mulai upload/data <b>${monthStart}</b> · data terakhir <b>${monthEnd}</b> · ${dates.length} hari tersedia`:'Belum ada data bulan berjalan.';
- if($('multiRowsLabel'))$('multiRowsLabel').textContent=`${rows.length} blok · bulan berjalan`;
- if($('multiBlockTable'))$('multiBlockTable').innerHTML=rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})).map(r=>`<tr><td>${esc(r.site)}</td><td><b>${esc(r.afdeling)}</b></td><td><b>${esc(r.block)}</b></td><td>${fmt(r.ha)}</td><td>${fmt(r.cpt)}</td><td>${fmt(r.cwm)}</td><td>${fmt(r.wdc)}</td><td>${fmt(r.wdm)}</td><td>${fmt(r.pruning)}</td><td>${fmt(r.pupuk)}</td><td>${fmt(r.other)}</td><td>${fmt(r.total)}</td><td>${r.ha?fmt(r.coverage)+'%':'—'}</td><td>${fmt(r.days)}</td></tr>`).join('')||'<tr><td colspan="14" class="empty">Belum ada pekerjaan dari CSV bulan berjalan.</td></tr>';
- const ag={};rows.forEach(r=>{const k=r.site+'|'+r.afdeling;ag[k]??={site:r.site,afdeling:r.afdeling,blocks:0,ha:0,cpt:0,cwm:0,wdc:0,wdm:0,pruning:0,pupuk:0,other:0,total:0};const z=ag[k];z.blocks++;z.ha+=r.ha;z.cpt+=r.cpt;z.cwm+=r.cwm;z.wdc+=r.wdc;z.wdm+=r.wdm;z.pruning+=r.pruning;z.pupuk+=r.pupuk;z.other+=r.other;z.total+=r.total});
- if($('multiAfdelingTable'))$('multiAfdelingTable').innerHTML=Object.values(ag).sort((a,b)=>a.afdeling.localeCompare(b.afdeling)).map(r=>`<tr><td>${esc(r.site)}</td><td><b>${esc(r.afdeling)}</b></td><td>${fmt(r.blocks)}</td><td>${fmt(r.ha)}</td><td>${fmt(r.cpt)}</td><td>${fmt(r.cwm)}</td><td>${fmt(r.wdc)}</td><td>${fmt(r.wdm)}</td><td>${fmt(r.pruning)}</td><td>${fmt(r.pupuk)}</td><td>${fmt(r.other)}</td><td>${fmt(r.total)}</td><td>${r.ha?fmt(100*r.total/r.ha)+'%':'—'}</td></tr>`).join('')||'<tr><td colspan="13" class="empty">Belum ada data bulan berjalan.</td></tr>';
- const dailyDate=multiAfdelingState.period||monthEnd;const daily=multiDailyRowsFromItems(items,dailyDate).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling));multiAfdelingState.dailyRows=daily;
- if($('multiDailyInfo'))$('multiDailyInfo').textContent=`Laporan daily: ${dailyDate||'—'} · ${daily.length} blok · semua afdeling yang tersedia pada tanggal tersebut`; if($('multiDailyTable'))$('multiDailyTable').innerHTML=daily.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})).map(r=>`<tr><td>${esc(r.site)}</td><td>${esc(r.afdeling)}</td><td><b>${esc(r.block)}</b></td><td>${fmt(r.cpt)}</td><td>${fmt(r.cwm)}</td><td>${fmt(r.wdc)}</td><td>${fmt(r.wdm)}</td><td>${fmt(r.pruning)}</td><td>${fmt(r.pupuk)}</td><td>${fmt(r.other)}</td><td>${fmt(r.total)}</td></tr>`).join('')||'<tr><td colspan=11 class="empty">Tidak ada pekerjaan pada tanggal tersebut.</td></tr>';
- const dbA=$('dashboardAfdelingFilter'),dbS=$('dashboardSiteFilter'),dbB=$('dashboardHaBasis');if(dbA&&dbS){const dba=dbA.value||'',dbsV=dbS.value||'';let drows=rows;if(dba)drows=drows.filter(r=>r.afdeling===dba);if(dbsV)drows=drows.filter(r=>r.site===dbsV);const dHa=drows.reduce((s,r)=>s+(hestiHa(r.block,dbB?.value||'HESTI')||0),0),dTotal=drows.reduce((s,r)=>s+r.total,0);if($('dashboardMultiSummary'))$('dashboardMultiSummary').innerHTML=`<b>${drows.length}</b> blok · <b>${fmt(dHa)} Ha</b> baseline · <b>${fmt(dTotal)} Ha</b> akumulasi pekerjaan bulan berjalan · coverage <b>${dHa?fmt(100*dTotal/dHa):'0'}%</b>`}}
 function initMultiAfdeling(){const rer=()=>{multiAfdelingState.site=$('multiSiteFilter')?.value||'';multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';multiAfdelingState.period=$('multiPeriodFilter')?.value||'';multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';renderMultiAfdeling()};['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=rer});['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{multiAfdelingState.basis=$('dashboardHaBasis')?.value||'HESTI';renderMultiAfdeling()}});const mainAf=$('mainAfdelingFilter');if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);$('multiDownloadMonthBtn')?.addEventListener('click',()=>{const rows=(multiAfdelingState.rows||[]).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling));multiDownload(rows,`AMIRA_Multi_Afdeling_Akumulasi_${multiCurrentMonthKey()}_${multiAfdelingState.monthStart||'start'}_${multiAfdelingState.monthEnd||'latest'}.csv`,'AMIRA MULTI AFDELING · AKUMULASI BULAN BERJALAN',{start:multiAfdelingState.monthStart,end:multiAfdelingState.monthEnd,date:multiAfdelingState.monthEnd})});$('multiDownloadDailyBtn')?.addEventListener('click',()=>{const date=multiAfdelingState.period||multiAfdelingState.monthEnd,rows=(multiAfdelingState.dailyRows||[]).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling));multiDownload(rows,`AMIRA_Multi_Afdeling_Daily_${date||'NA'}.csv`,'AMIRA MULTI AFDELING · LAPORAN DAILY',{date,start:date,end:date})});$('dashboardMultiReset')?.addEventListener('click',()=>{['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';multiAfdelingState.site='';multiAfdelingState.afdeling='';multiAfdelingState.period='';multiAfdelingState.basis='HESTI';renderMultiAfdeling()});renderMultiAfdeling()}
 async function monthlyPeriodBounds(key){const m=String(key||'').match(/^(\d{4})-(\d{2})$/);if(!m)return null;const y=Number(m[1]),mo=Number(m[2]);const start=new Date(Date.UTC(y,mo-1,21));const end=new Date(Date.UTC(y,mo,20));const iso=d=>d.toISOString().slice(0,10);return{key, start:iso(start), end:iso(end), label:`21 ${start.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})} – 20 ${end.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})}`};}
 function monthlyPeriodKey(date){const d=String(date||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return'';const y=Number(d.slice(0,4)),m=Number(d.slice(5,7)),day=Number(d.slice(8,10));return day>=21?`${y}-${String(m).padStart(2,'0')}`:`${m===1?y-1:y}-${String(m===1?12:m-1).padStart(2,'0')}`;}
