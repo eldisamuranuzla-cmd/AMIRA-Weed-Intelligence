@@ -380,7 +380,14 @@ function renderCumulativeBalanceRows(){
 }
 
 function balanceCsvCell(v){
- let s=String(v??'').replace(/\r?\n/g,' ').replace(/"/g,'""');
+ if(v===null||v===undefined)return '';
+ if(typeof v==='number'&&Number.isFinite(v)){
+   let s=String(v);
+   if(s.includes('e')||s.includes('E'))s=v.toFixed(10);
+   s=s.replace(/0+$/,'').replace(/\.$/,'');
+   return s.replace('.',',');
+ }
+ let s=String(v).replace(/\r?\n/g,' ').replace(/"/g,'""');
  return `"${s}"`;
 }
 function downloadCumulativeMaterialBalance(){
