@@ -363,15 +363,18 @@ async function amiraCumulativeMaterialActual(d){
 }
 async function refreshCumulativeMaterialBalance(){
  try{
-   const d=state.data||buildData(), agg=await amiraCumulativeMaterialActual(d);
+   const d=state.data||buildData();
+   const normBal=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const a={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return a[n]||n};
+   const subtypeBal=t=>{const m=String(t||'').toUpperCase().match(/^(?:CWC|PTC|WDC)([1-4])$/);return m?m[1]:''};
+   const agg=await amiraCumulativeMaterialActual(d);
    if(!agg.size)return;
    const rows=[];
    const baseGroups=new Map();
    Object.values(d.prescriptionByBlock||{}).forEach(p=>{
      const internal=String(p.type||'').toUpperCase(), fam=internal.match(/^(CWC|PTC|WDC)/)?.[1]; if(!fam)return;
-     const report=(fam==='CWC'||fam==='PTC')?'CPT':'WDC', st=subtype(internal);
+     const report=(fam==='CWC'||fam==='PTC')?'CPT':'WDC', st=subtypeBal(internal);
      p.items.forEach(x=>{
-       const canonical=normBalanceMat(x.material), k=[p.block,report,st,canonical].join('|'), prev=baseGroups.get(k);
+       const canonical=normBal(x.material), k=[p.block,report,st,canonical].join('|'), prev=baseGroups.get(k);
        if(prev){prev.total+=num(x.total);prev.cost+=num(x.cost);}
        else baseGroups.set(k,{block:p.block,type:report,subtype:st,material:x.material,total:num(x.total),cost:num(x.cost),ha:num(p.ha),uom:x.uom||'',price:num(x.price)});
      });
