@@ -66,7 +66,7 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <div class="scroll" style="max-height:420px"><table><thead><tr><th>Blok</th><th>Ha</th><th>Jenis</th><th>Racun</th><th>Produk</th><th>Dosis/Ha</th><th>Base/Rotasi</th><th>Harga</th><th>Base Cost</th><th>UOM</th></tr></thead><tbody id="rxTable"></tbody></table></div></div>
 <div class="card"><div class="head"><h3>Material Mapping</h3><span>CSV M_MATERIAL ↔ Base Excel</span></div><div class="notice">AMIRA melakukan normalisasi nama material. Jika tidak ditemukan padanan yang jelas, material tidak dipaksa masuk ke prescription.</div><div class="scroll"><table><thead><tr><th>Code</th><th>Master Description</th><th>UOM</th><th>Normalized</th><th>Status</th></tr></thead><tbody id="rxMaterialMap"></tbody></table></div></div>
 <div class="card"><div class="head"><h3>Base Racun per Blok</h3><span>Source of truth · Engine 06</span></div><div class="scroll"><table><thead><tr><th>Blok</th><th>Jenis</th><th>Racun</th><th>Base Requirement</th><th>Dosis/Ha</th><th>Harga</th><th>Base Cost</th></tr></thead><tbody id="rxStockTable"></tbody></table></div></div><div id="rxPager" class="notice" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span id="rxPageInfo">—</span><span style="display:flex;gap:6px"><button class="btn secondary" id="rxPrev">‹ Prev</button><button class="btn secondary" id="rxNext">Next ›</button></span></div></section>
-<section id="page-balance" class="page"><div class="eyebrow">ENGINE 07 · RECONCILIATION</div><div class="title">Material Balance</div><div class="meta"><b>MAIN Engine 05 Actual − Engine 06 Base</b>. Positif = over pemakaian terhadap base; negatif = masih di bawah base.</div><div class="card" style="margin-top:14px"><div class="scroll"><table><thead><tr><th>Blok</th><th>Jenis Semprot</th><th>Material</th><th>Base</th><th>Actual</th><th>Actual − Base</th><th>Dosis Actual</th><th>UOM</th><th>Status</th></tr></thead><tbody id="balanceDetail"></tbody></table></div></div></section>
+<section id="page-balance" class="page"><div class="eyebrow">ENGINE 07 · RECONCILIATION</div><div class="title">Material Balance</div><div class="meta"><b>MAIN Engine 05 Actual − Engine 06 Base</b>. Positif = over pemakaian terhadap base; negatif = masih di bawah base.</div><div class="card" style="margin-top:14px"><div class="filters" style="margin-bottom:8px"><label>Afdeling<select id="balanceAfdelingFilter"><option value="">Semua Afdeling</option><option value="OAYM">OAYM</option><option value="OBYM">OBYM</option><option value="OCYM">OCYM</option><option value="ODYM">ODYM</option><option value="OEYM">OEYM</option></select></label><label>Workstream<select id="balanceWorkstreamFilter"><option value="">Semua Workstream</option><option value="CPT">CPT</option><option value="WDC">WDC</option></select></label><div style="display:flex;align-items:end;gap:7px;flex-wrap:wrap"><button class="btn" id="balanceDownloadBtn" type="button">Download Material Balance</button><button class="btn secondary" id="balanceResetBtn" type="button">Reset Filter</button></div></div><div class="notice" id="balanceFilterInfo">Menampilkan seluruh Material Balance kumulatif pada periode buku berjalan.</div><div class="scroll"><table><thead><tr><th>Blok</th><th>Jenis Semprot</th><th>Material</th><th>Base</th><th>Actual</th><th>Actual − Base</th><th>Dosis Actual</th><th>UOM</th><th>Status</th></tr></thead><tbody id="balanceDetail"></tbody></table></div></div></section>
 <section id="page-plan" class="page"><div class="eyebrow">ENGINE 07</div><div class="title">Plan vs Realization</div><div class="meta">Per workstream dan blok, berdasarkan PLANHARIAN vs T_SIC.</div><div class="card" style="margin-top:14px"><div id="planDetail"></div></div></section>
 <section id="page-activity" class="page"><div class="eyebrow">ENGINE 08 · WORKER × ITEM</div><div class="title">Activity & Worker</div><div class="meta">HK dihitung pada level item pekerjaan: worker yang mengerjakan beberapa item pada blok/tanggal yang sama tetap 1 HK overall, sementara setiap item mempertahankan Ha-nya sendiri.</div><div class="card" style="margin-top:14px"><div class="head"><h3>Rekap Worker × Item</h3><span>Source: T_SIC · P4</span></div><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Blok</th><th>WS</th><th>Item</th><th>Job Code</th><th>HK</th><th>Ha</th><th>Ha/HK</th></tr></thead><tbody id="itemHKDetail"></tbody></table></div></div><div class="card" style="margin-top:10px"><div class="head"><h3>Detail Worker Activity</h3><span>Worker dapat muncul di beberapa item</span></div><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Worker</th><th>Job</th><th>Item</th><th>WS</th><th>Blok</th><th>Ha</th></tr></thead><tbody id="workerDetail"></tbody></table></div></div></section>
 <section id="page-evidence" class="page"><div class="eyebrow">ENGINE 09</div><div class="title">Evidence</div><div class="meta">Bukti lapangan tidak dibuat-buat; hanya data foto/GPS yang benar-benar ada.</div><div class="card" style="margin-top:14px"><div id="evidenceDetail"></div></div></section>
@@ -361,6 +361,53 @@ async function amiraCumulativeMaterialActual(d){
  }
  return out;
 }
+
+let amiraBalanceRows=[];
+let amiraBalanceFilter={afdeling:'',workstream:''};
+
+function renderCumulativeBalanceRows(){
+ const el=$('balanceDetail'); if(!el)return;
+ const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ const info=$('balanceFilterInfo');
+ if(info)info.textContent=`Material Balance: ${rows.length} baris · Afdeling: ${afd||'Semua'} · Workstream: ${ws||'Semua'} · Actual kumulatif periode 21–20.`;
+ el.innerHTML=rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
+ .map(r=>{
+   const dose=r.ha?r.actual/r.ha:0,over=r.baseExists&&r.diff>0.000001;
+   const status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';
+   return `<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`;
+ }).join('')||`<tr><td colspan="9" class="empty">Tidak ada data Material Balance sesuai filter.</td></tr>`;
+}
+
+function balanceCsvCell(v){
+ let s=String(v??'').replace(/\r?\n/g,' ').replace(/"/g,'""');
+ return `"${s}"`;
+}
+function downloadCumulativeMaterialBalance(){
+ const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ if(!rows.length){alert('Tidak ada data Material Balance sesuai filter.');return;}
+ const lines=[];
+ lines.push(['AMIRA MATERIAL BALANCE KUMULATIF','Periode','21–20','Afdeling',afd||'Semua Afdeling','Workstream',ws||'Semua'].map(balanceCsvCell).join(';'));
+ lines.push(['Afdeling','Blok','Jenis Semprot','Subtype','Material','Base','Actual Kumulatif','Actual − Base','Ha','Dosis Actual','UOM','Status'].map(balanceCsvCell).join(';'));
+ rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).forEach(r=>{
+   const dose=r.ha?r.actual/r.ha:0, over=r.baseExists&&r.diff>0.000001;
+   const status=!r.baseExists?'NO BASE':over?'OVER BASE':'≤ BASE';
+   lines.push([r.afdeling,r.block,r.type,r.typeInternal,r.material,r.baseExists?r.base:'',r.actual,r.baseExists?r.diff:'',r.ha,dose,r.uom,status].map(balanceCsvCell).join(';'));
+ });
+ const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=`AMIRA_Material_Balance_${afd||'ALL_AFD'}_${ws||'ALL_WS'}.csv`;
+ document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function initMaterialBalanceControls(){
+ const af=$('balanceAfdelingFilter'), wf=$('balanceWorkstreamFilter');
+ if(af&&!af.dataset.bound){af.dataset.bound='1';af.onchange=()=>{amiraBalanceFilter.afdeling=af.value;renderCumulativeBalanceRows();};}
+ if(wf&&!wf.dataset.bound){wf.dataset.bound='1';wf.onchange=()=>{amiraBalanceFilter.workstream=wf.value;renderCumulativeBalanceRows();};}
+ const dl=$('balanceDownloadBtn');if(dl&&!dl.dataset.bound){dl.dataset.bound='1';dl.onclick=downloadCumulativeMaterialBalance;}
+ const rs=$('balanceResetBtn');if(rs&&!rs.dataset.bound){rs.dataset.bound='1';rs.onclick=()=>{amiraBalanceFilter={afdeling:'',workstream:''};if(af)af.value='';if(wf)wf.value='';renderCumulativeBalanceRows();};}
+}
+
 async function refreshCumulativeMaterialBalance(){
  try{
    const d=state.data||buildData();
@@ -382,19 +429,15 @@ async function refreshCumulativeMaterialBalance(){
    agg.forEach(a=>{
      const b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));
      const base=num(b?.total), actual=num(a.actual), diff=actual-base, ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;
-     rows.push({block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
+     rows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
    });
-   const el=$('balanceDetail'); if(!el)return;
-   el.innerHTML=rows.sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
-     .map(r=>{
-       const dose=r.ha?r.actual/r.ha:0, over=r.baseExists&&r.diff>0.000001;
-       const status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';
-       return `<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`;
-     }).join('')||`<tr><td colspan="9" class="empty">Belum ada penggunaan material aktual dari T_MATERIAL.</td></tr>`;
+   amiraBalanceRows=rows;
+   initMaterialBalanceControls();
+   renderCumulativeBalanceRows();
  }catch(e){console.warn('Cumulative Material Balance:',e)}
 }
 
-function renderAll(){state.data=buildData();$('today').textContent=state.dataset.date?new Date(state.dataset.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):'—';renderDashboard();renderPages();renderRacunPage();updateControl();updateHistory();renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));refreshCumulativeMaterialBalance();}
+function renderAll(){state.data=buildData();initMaterialBalanceControls();$('today').textContent=state.dataset.date?new Date(state.dataset.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):'—';renderDashboard();renderPages();renderRacunPage();updateControl();updateHistory();renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));refreshCumulativeMaterialBalance();}
 function workData(w){let d=state.data;return{ha:d.actualWS[w]||0,blocks:new Set(d.sic.filter(r=>classify(r.JOBCODE,job(r.JOBCODE).DESCRIPTION||'')===w).map(r=>clean(r.BLOKCODE)).filter(Boolean)).size,hk:d.hkWS[w]?.size||0,racun:d.racunWS[w]||0,dose:(d.actualWS[w]||0)?(d.racunWS[w]||0)/(d.actualWS[w]||0):0}}
 function itemName(code){const c=clean(code);const names={'220601':'CWC','220602':'CWC','220401':'PATH CHEMIST','220402':'PATH CHEMIST CONTROL','220503':'TPH CHEMIST','230201':'WDC','230202':'WDC FOLLOW UP','230101':'WDM','230102':'WDM','230103':'WDM','230301':'WIPPING LALANG','240101':'PRUNING'};return names[c]||job(c).DESCRIPTION||c||'—'}
 function itemHKRows(){const d=state.data||buildData();return (d.itemHK||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.code.localeCompare(b.code));}
@@ -782,7 +825,7 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
  Object.values(d.prescriptionByBlock||{}).forEach(p=>{const internal=String(p.type||'').toUpperCase(),fam=familyOfType(internal);if(!fam)return;const reportFamily=(fam==='CWC'||fam==='PTC')?'CPT':'WDC',subtype=subtypeOfType(internal);p.items.forEach(x=>{const canonical=normBalanceMat(x.material),k=[p.block,reportFamily,subtype,canonical].join('|'),prev=baseGroups.get(k);if(prev){prev.total+=num(x.total);prev.dose+=num(x.dose);prev.cost+=num(x.cost);}else baseGroups.set(k,{block:p.block,type:reportFamily,subtype,material:x.material,total:num(x.total),dose:num(x.dose),cost:num(x.cost),ha:num(p.ha),uom:x.uom||'',price:num(x.price)});});});
 
  // ENGINE 07: ALWAYS show every actual material usage. Actual - Base when base exists.
- actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
+ actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
  $('balanceDetail').innerHTML=balanceRows.sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).map(r=>{const dose=r.ha?r.actual/r.ha:0,over=r.baseExists&&r.diff>0.000001,status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';return`<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`}).join('')||`<tr><td colspan="9" class="empty">Belum ada penggunaan material aktual dari T_MATERIAL.</td></tr>`;
  $('planDetail').innerHTML=`<table><thead><tr><th>WS</th><th>Plan Ha</th><th>Real Ha</th><th>Achievement</th></tr></thead><tbody>${WS.map(w=>`<tr><td>${w}</td><td>${fmt(d.planWS[w])}</td><td>${fmt(d.actualWS[w])}</td><td>${d.planWS[w]?fmt(pct(d.actualWS[w],d.planWS[w]))+'%':'—'}</td></tr>`).join('')}</tbody></table>`;
  const ihr=itemHKRows();$('itemHKDetail').innerHTML=ihr.map(x=>{const ha=x.hk?((workerItemHa.get([x.date,x.block,x.code].join('|'))||0)):0;return`<tr><td>${x.date||'—'}</td><td>${x.block}</td><td>${x.ws}</td><td><b>${itemName(x.code)}</b></td><td>${x.code}</td><td>${fmt(x.hk)}</td><td>${fmt(ha)}</td><td>${x.hk?fmt(ha/x.hk):'—'}</td></tr>`}).join('')||`<tr><td colspan="8" class="empty">Belum ada item activity.</td></tr>`;
