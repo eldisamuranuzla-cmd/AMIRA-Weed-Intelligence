@@ -282,7 +282,116 @@ function dailyDownload(){
  const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`AMIRA_Daily_${date}_${afd}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
-function renderAll(){state.data=buildData();$('today').textContent=state.dataset.date?new Date(state.dataset.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):'—';renderDashboard();renderPages();renderRacunPage();updateControl();updateHistory();renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));}
+
+/* AMIRA MATERIAL BALANCE v2 — cumulative actual by block/subtype/material
+   Scope: locked historical datasets in the same 21–20 book period.
+   Base prescription is NOT repeated per upload/date.
+*/
+function amiraBookPeriod(dateStr){
+ const s=String(dateStr||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return '';
+ const d=new Date(s+'T00:00:00'), y=d.getFullYear(), m=d.getMonth(), day=d.getDate();
+ if(day>=21){const nm=m===11?1:m+2;const yy=m===11?y+1:y;return `${yy}-${String(nm).padStart(2,'0')}`;}
+ return `${y}-${String(m+1).padStart(2,'0')}`;
+}
+async function amiraCumulativeMaterialActual(d){
+ const out=new Map();
+ const family=c=>{c=clean(c);if(['220601','220602'].includes(c))return'CWC';if(['220401','220402','220503'].includes(c))return'PTC';if(['230201','230202'].includes(c))return'WDC';return null};
+ const subtype=t=>{const m=String(t||'').toUpperCase().match(/^(?:CWC|PTC|WDC)([1-4])$/);return m?m[1]:''};
+ const norm=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const a={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return a[n]||n};
+ const baseItems=(block,type)=>d.prescriptionByBlock?.[[block,type].join('|')]?.items||[];
+ const process=(sic,mats,sourceDate)=>{
+   const sicMap={};
+   sic.forEach(r=>{
+     const k=[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|');
+     const b=clean(r.BLOKCODE); if(b)(sicMap[k]??=new Set()).add(b);
+   });
+   mats.forEach(r=>{
+     const jc=clean(r.JOBCODE), mdor=clean(r.MANDORCODE), dt=normDate(r.TANGGAL||r.DATE)||sourceDate;
+     const key=[jc,mdor,dt].join('|'), blocks=[...(sicMap[key]||[])].filter(Boolean), items=[];
+     for(let i=1;i<=6;i++){
+       const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]), q=num(r['QTYMAT'+i]||r['QTY'+i]);
+       if(mc&&q)items.push({code:mc,qty:q});
+     }
+     if(!items.length||!blocks.length)return;
+     const p4={};
+     sic.filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===key&&clean(x.BLOKCODE))
+       .forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(v>0)p4[b]=(p4[b]||0)+v});
+     const totalP4=blocks.reduce((a,b)=>a+(p4[b]||0),0); if(totalP4<=0)return;
+     const jf=family(jc)||(classify(jc,job(jc).DESCRIPTION||'')==='WDC'?'WDC':null); if(!jf)return;
+     const matSet=new Set(items.map(x=>norm(mat(x.code).DESCRIPTION||x.code)));
+     const allowed=jf==='CWC'?['CWC1','CWC2','CWC3','CWC4']:jf==='PTC'?['PTC1','PTC2','PTC3','PTC4']:['WDC1','WDC2','WDC3','WDC4'];
+     blocks.forEach(block=>{
+       const share=(p4[block]||0)/totalP4;
+       const candidates=allowed.filter(type=>{
+         const bs=new Set(baseItems(block,type).map(x=>norm(x.material)));
+         return bs.size===matSet.size && [...matSet].every(m=>bs.has(m));
+       });
+       if(candidates.length!==1)return;
+       const type=candidates[0], reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC', st=subtype(type);
+       items.forEach(it=>{
+         const mdesc=mat(it.code).DESCRIPTION||it.code, canonical=norm(mdesc);
+         const k=[block,reportFamily,st,canonical].join('|'), q=it.qty*share, prev=out.get(k);
+         if(prev)prev.actual+=q;
+         else out.set(k,{block,type:reportFamily,subtype:st,material:mdesc,canonical,actual:q,uom:mat(it.code).UOM||'—'});
+       });
+     });
+   });
+ };
+ const targetPeriod=amiraBookPeriod(d.date||state.dataset.date);
+ const snaps=await allSnaps();
+ for(const snap of snaps){
+   if(String(snap.status||'LOCKED').toUpperCase()!=='LOCKED')continue;
+   if(amiraBookPeriod(snap.date)!==targetPeriod)continue;
+   // If the current UI is already loaded from this locked snapshot, it is included once here.
+   const parsedMaster=await rawText(snap.masterRaw||'');
+   if(parsedMaster){
+     const pm=parseMaster(parsedMaster);
+     state.__amiraTempMaster=pm;
+   }
+   const sic=[],mats=[];
+   for(const f of snap.files||[]){
+     const raw=await rawText(f.raw); const p=parseAmanda(raw);
+     sic.push(...(p.sections.T_SIC||[])); mats.push(...(p.sections.T_MATERIAL||[]));
+   }
+   process(dedupRows(sic),dedupRows(mats),snap.date);
+ }
+ // Draft/current active dataset is not in History yet: include it once.
+ if(!state.dataset.locked && state.sections?.T_MATERIAL?.length){
+   process(dedupRows(state.sections.T_SIC||[]),dedupRows(state.sections.T_MATERIAL||[]),state.dataset.date);
+ }
+ return out;
+}
+async function refreshCumulativeMaterialBalance(){
+ try{
+   const d=state.data||buildData(), agg=await amiraCumulativeMaterialActual(d);
+   if(!agg.size)return;
+   const rows=[];
+   const baseGroups=new Map();
+   Object.values(d.prescriptionByBlock||{}).forEach(p=>{
+     const internal=String(p.type||'').toUpperCase(), fam=internal.match(/^(CWC|PTC|WDC)/)?.[1]; if(!fam)return;
+     const report=(fam==='CWC'||fam==='PTC')?'CPT':'WDC', st=subtype(internal);
+     p.items.forEach(x=>{
+       const canonical=normBalanceMat(x.material), k=[p.block,report,st,canonical].join('|'), prev=baseGroups.get(k);
+       if(prev){prev.total+=num(x.total);prev.cost+=num(x.cost);}
+       else baseGroups.set(k,{block:p.block,type:report,subtype:st,material:x.material,total:num(x.total),cost:num(x.cost),ha:num(p.ha),uom:x.uom||'',price:num(x.price)});
+     });
+   });
+   agg.forEach(a=>{
+     const b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));
+     const base=num(b?.total), actual=num(a.actual), diff=actual-base, ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;
+     rows.push({block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
+   });
+   const el=$('balanceDetail'); if(!el)return;
+   el.innerHTML=rows.sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
+     .map(r=>{
+       const dose=r.ha?r.actual/r.ha:0, over=r.baseExists&&r.diff>0.000001;
+       const status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';
+       return `<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`;
+     }).join('')||`<tr><td colspan="9" class="empty">Belum ada penggunaan material aktual dari T_MATERIAL.</td></tr>`;
+ }catch(e){console.warn('Cumulative Material Balance:',e)}
+}
+
+function renderAll(){state.data=buildData();$('today').textContent=state.dataset.date?new Date(state.dataset.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):'—';renderDashboard();renderPages();renderRacunPage();updateControl();updateHistory();renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));refreshCumulativeMaterialBalance();}
 function workData(w){let d=state.data;return{ha:d.actualWS[w]||0,blocks:new Set(d.sic.filter(r=>classify(r.JOBCODE,job(r.JOBCODE).DESCRIPTION||'')===w).map(r=>clean(r.BLOKCODE)).filter(Boolean)).size,hk:d.hkWS[w]?.size||0,racun:d.racunWS[w]||0,dose:(d.actualWS[w]||0)?(d.racunWS[w]||0)/(d.actualWS[w]||0):0}}
 function itemName(code){const c=clean(code);const names={'220601':'CWC','220602':'CWC','220401':'PATH CHEMIST','220402':'PATH CHEMIST CONTROL','220503':'TPH CHEMIST','230201':'WDC','230202':'WDC FOLLOW UP','230101':'WDM','230102':'WDM','230103':'WDM','230301':'WIPPING LALANG','240101':'PRUNING'};return names[c]||job(c).DESCRIPTION||c||'—'}
 function itemHKRows(){const d=state.data||buildData();return (d.itemHK||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.code.localeCompare(b.code));}
