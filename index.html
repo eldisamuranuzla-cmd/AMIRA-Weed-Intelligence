@@ -290,6 +290,7 @@ function dailyDownload(){
 function amiraBookPeriod(dateStr){
  const s=String(dateStr||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return '';
  const d=new Date(s+'T00:00:00'), y=d.getFullYear(), m=d.getMonth(), day=d.getDate();
+ if(s>='2026-08-18'&&s<='2026-08-20')return '2026-09';
  if(day>=21){const nm=m===11?1:m+2;const yy=m===11?y+1:y;return `${yy}-${String(nm).padStart(2,'0')}`;}
  return `${y}-${String(m+1).padStart(2,'0')}`;
 }
@@ -370,7 +371,7 @@ function renderCumulativeBalanceRows(){
  const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
  const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
  const info=$('balanceFilterInfo');
- if(info)info.textContent=`Material Balance: ${rows.length} baris · Afdeling: ${afd||'Semua'} · Workstream: ${ws||'Semua'} · Actual kumulatif periode 21–20.`;
+ if(info){const special=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09';info.textContent=`Material Balance: ${rows.length} baris · Afdeling: ${afd||'Semua'} · Workstream: ${ws||'Semua'} · Actual kumulatif ${special?'18 Agustus–20 September 2026 (khusus)':'periode 21–20'}.`; }
  el.innerHTML=rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
  .map(r=>{
    const dose=r.ha?r.actual/r.ha:0,over=r.baseExists&&r.diff>0.000001;
@@ -395,7 +396,7 @@ function downloadCumulativeMaterialBalance(){
  const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
  if(!rows.length){alert('Tidak ada data Material Balance sesuai filter.');return;}
  const lines=[];
- lines.push(['AMIRA MATERIAL BALANCE KUMULATIF','Periode','21–20','Afdeling',afd||'Semua Afdeling','Workstream',ws||'Semua'].map(balanceCsvCell).join(';'));
+ const balancePeriodLabel=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09'?'18 Agustus 2026 – 20 September 2026':'21–20';lines.push(['AMIRA MATERIAL BALANCE KUMULATIF','Periode',balancePeriodLabel,'Afdeling',afd||'Semua Afdeling','Workstream',ws||'Semua'].map(balanceCsvCell).join(';'));
  lines.push(['Afdeling','Blok','Jenis Semprot','Subtype','Material','Base','Actual Kumulatif','Actual − Base','Ha','Dosis Actual','UOM','Status'].map(balanceCsvCell).join(';'));
  rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).forEach(r=>{
    const dose=r.ha?r.actual/r.ha:0, over=r.baseExists&&r.diff>0.000001;
@@ -466,14 +467,15 @@ function multiCurrentMonthKey(){const d=new Date();return `${d.getFullYear()}-${
 function aggregateSicRows(rows,sourceDate){const sic=dedupRows(rows||[]),workerMap={};sic.forEach(r=>{const c=clean(r.JOBCODE),j=job(c),w=classify(c,j.DESCRIPTION||''),b=clean(r.BLOKCODE)||'—',d=normDate(r.TANGGAL||r.DATE)||sourceDate||'',m=clean(r.MANDORCODE),worker=clean(r.EMPNO||r.EMPCODE||r.NAMA)||'UNKNOWN',ha=num(r.P4);if(!ha||!b||b==='—'||!d)return;const k=[d,b,c,m,worker].join('|');workerMap[k]??={date:d,block:b,code:c,ws:w,worker,ha:0};workerMap[k].ha+=ha});return Object.values(workerMap)}
 async function historicalWorkRows(){
  const snaps=await allSnaps(),all=[],activeDate=String(state.dataset.date||'').slice(0,10),activeAfd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'');
- const month=multiCurrentMonthKey();
- for(const s of snaps){const date=String(s.date||'').slice(0,10);if(!date||multiMonthKey(date)!==month)continue;
+ const today=new Date().toISOString().slice(0,10),specialStart='2026-08-18',specialEnd='2026-09-20',special=today>=specialStart&&today<=specialEnd;
+ const windowStart=special?specialStart:(today.slice(0,7)+'-01'),windowEnd=special?specialEnd:(today.slice(0,7)+'-31');
+ for(const s of snaps){const date=String(s.date||'').slice(0,10);if(!date||date<windowStart||date>windowEnd)continue;
    const sAfd=afdelingLabel(s.afdeling||snapAfdeling(s)||'');
    if(state.files.length&&activeDate===date&&sAfd===activeAfd)continue;
    const sic=[];for(const f of(s.files||[])){try{const raw=await rawText(f.raw),p=parseAmanda(raw);sic.push(...(p.sections.T_SIC||[]))}catch(e){}}
    all.push(...aggregateSicRows(sic,date).map(x=>({...x,afdeling:sAfd||afdelingLabel(afdelingOfBlock(x.block))})));
  }
- if(activeDate&&multiMonthKey(activeDate)===month&&state.sections?.T_SIC?.length){all.push(...aggregateSicRows(state.sections.T_SIC,activeDate).map(x=>({...x,afdeling:activeAfd||afdelingLabel(afdelingOfBlock(x.block))})))}
+ if(activeDate&&activeDate>=windowStart&&activeDate<=windowEnd&&state.sections?.T_SIC?.length){all.push(...aggregateSicRows(state.sections.T_SIC,activeDate).map(x=>({...x,afdeling:activeAfd||afdelingLabel(afdelingOfBlock(x.block))})))}
  const seen=new Set(),out=[];for(const x of all){const k=[x.date,x.afdeling,x.block,x.code,x.worker,x.mandor,x.ha].join('|');if(!seen.has(k)){seen.add(k);out.push(x)}}
  return out.sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.afdeling).localeCompare(String(b.afdeling))||String(a.block).localeCompare(String(b.block),undefined,{numeric:true}));
 }
@@ -539,7 +541,7 @@ async function renderMultiAfdeling(){
  const displayRows=multiFilterRowsByWorkstream(rows),selectedWs=multiSelectedWorkstream(),selectedLabel=multiWorkstreamLabel(selectedWs);
  const haTotal=displayRows.reduce((s,r)=>s+r.ha,0),total=displayRows.reduce((s,r)=>s+r.total,0),cov=haTotal?100*total/haTotal:0;
  if($('multiKpis'))$('multiKpis').innerHTML=[['Blok',displayRows.length],['Ha HeStI',fmt(haTotal)], [selectedLabel,fmt(total)+' Ha'],['Total Pekerjaan',fmt(total)+' Ha'],['Coverage',fmt(cov)+'%']].map(x=>`<div class="detailKpi"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('');
- if($('multiMonthInfo'))$('multiMonthInfo').innerHTML=monthStart?`Akumulasi bulan berjalan <b>${month}</b> · mulai upload/data <b>${monthStart}</b> · data terakhir <b>${monthEnd}</b> · ${dates.length} hari tersedia`:'Belum ada data bulan berjalan.';
+ if($('multiMonthInfo'))$('multiMonthInfo').innerHTML=monthStart?`Akumulasi periode <b>${month==='2026-09'?'18 Agustus 2026 – 20 September 2026 (khusus)':'bulan berjalan'}</b> · mulai upload/data <b>${monthStart}</b> · data terakhir <b>${monthEnd}</b> · ${dates.length} hari tersedia`:'Belum ada data periode.';
  if($('multiRowsLabel'))$('multiRowsLabel').textContent=`${rows.length} blok · bulan berjalan`;
  if($('multiBlockTable'))$('multiBlockTable').innerHTML=displayRows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})).map(r=>`<tr><td>${esc(r.site)}</td><td><b>${esc(r.afdeling)}</b></td><td><b>${esc(r.block)}</b></td><td>${fmt(r.ha)}</td><td>${fmt(r.cpt)}</td><td>${fmt(r.cwm)}</td><td>${fmt(r.wdc)}</td><td>${fmt(r.wdm)}</td><td>${fmt(r.pupuk)}</td><td>${fmt(r.pruning)}</td><td>${fmt(r.other)}</td><td>${fmt(r.total)}</td><td>${r.ha?fmt(r.coverage)+'%':'—'}</td><td>${fmt(r.days)}</td></tr>`).join('')||'<tr><td colspan="14" class="empty">Belum ada pekerjaan dari CSV bulan berjalan.</td></tr>';
  const ag={};displayRows.forEach(r=>{const k=r.site+'|'+r.afdeling;ag[k]??={site:r.site,afdeling:r.afdeling,blocks:0,ha:0,cpt:0,cwm:0,wdc:0,wdm:0,pruning:0,pupuk:0,other:0,total:0};const z=ag[k];z.blocks++;z.ha+=r.ha;z.cpt+=r.cpt;z.cwm+=r.cwm;z.wdc+=r.wdc;z.wdm+=r.wdm;z.pruning+=r.pruning;z.pupuk+=r.pupuk;z.other+=r.other;z.total+=r.total});
@@ -595,7 +597,7 @@ function initMultiAfdeling(){
  });
  renderMultiAfdeling();
 }
-async function monthlyPeriodBounds(key){const m=String(key||'').match(/^(\d{4})-(\d{2})$/);if(!m)return null;const y=Number(m[1]),mo=Number(m[2]);const start=new Date(Date.UTC(y,mo-1,21));const end=new Date(Date.UTC(y,mo,20));const iso=d=>d.toISOString().slice(0,10);return{key, start:iso(start), end:iso(end), label:`21 ${start.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})} – 20 ${end.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})}`};}
+async function monthlyPeriodBounds(key){const m=String(key||'').match(/^(\d{4})-(\d{2})$/);if(!m)return null;const y=Number(m[1]),mo=Number(m[2]);const iso=d=>d.toISOString().slice(0,10);if(String(key)==='2026-09'){const start=new Date(Date.UTC(2026,7,18)),end=new Date(Date.UTC(2026,8,20));return{key,start:iso(start),end:iso(end),label:'18 Agustus 2026 – 20 September 2026 (Periode Khusus Agustus)'};}const start=new Date(Date.UTC(y,mo-1,21));const end=new Date(Date.UTC(y,mo,20));return{key,start:iso(start),end:iso(end),label:`21 ${start.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})} – 20 ${end.toLocaleDateString('id-ID',{month:'long',year:'numeric',timeZone:'UTC'})}`};}
 function monthlyPeriodKey(date){const d=String(date||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return'';const y=Number(d.slice(0,4)),m=Number(d.slice(5,7)),day=Number(d.slice(8,10));return day>=21?`${y}-${String(m).padStart(2,'0')}`:`${m===1?y-1:y}-${String(m===1?12:m-1).padStart(2,'0')}`;}
 function monthlyPeriodOptions(){
  const out=[]; let y=2026,m=9;
@@ -789,6 +791,7 @@ function initMonthly(){
  rer();
 }
 async function switchMainAfdeling(afd){afd=afdelingLabel(afd);if(!afd||afd==='MULTI')return;const snaps=await allSnaps();const candidates=snaps.filter(s=>afdelingLabel(snapAfdeling(s))===afd).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.lockedAt||'').localeCompare(String(a.lockedAt||'')));const currentDraft=state.dataset.status==='DRAFT'&&state.files.length;if(currentDraft){alert('Selesaikan atau jangan ubah dataset DRAFT aktif sebelum berpindah afdeling.');const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}if(!candidates[0]){alert(`Belum ada historical dataset untuk ${afd}. Upload dan LOCK dataset ${afd} terlebih dahulu.`);const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}await loadSnap(candidates[0]);}
+function initMultiAfdeling(){const rer=()=>{multiAfdelingState.site=$('multiSiteFilter')?.value||'';multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';multiAfdelingState.period=$('multiPeriodFilter')?.value||'';multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';renderMultiAfdeling()};['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=rer});['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{multiAfdelingState.basis=$('dashboardHaBasis')?.value||'HESTI';renderMultiAfdeling()}});const mainAf=$('mainAfdelingFilter');if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);$('dashboardMultiReset')?.addEventListener('click',()=>{['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';multiAfdelingState.site='';multiAfdelingState.afdeling='';multiAfdelingState.period='';multiAfdelingState.basis='HESTI';renderMultiAfdeling()});renderMultiAfdeling()}
 function isPupukJob(code){
  const c=clean(code),j=job(c)||{},n=String(j.DESCRIPTION||'').toUpperCase(),cg=String(j.KODECGP||j.CGP||j.KODE_CGP||'').toUpperCase();
  return cg==='PUPUK'||cg.includes('PUPUK')||/PUPUK|FERTIL/.test(n);
