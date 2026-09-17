@@ -279,7 +279,7 @@ function dailyDownload(){
  blocks.forEach(x=>{const ch=x.costHK,ha=x.ha||0,rh=ha?x.costRacun/ha:0,chha=ha?ch/ha:0,th=ha?(ch+x.costRacun)/ha:0;lines.push([x.afdeling,x.block,x.ha,x.hk,ch,chha,x.racunL,x.racunGr,x.costRacun,rh,th].map(dailyCsvCell).join(';'));});
  lines.push('');lines.push(['DETAIL PEKERJAAN PER BLOK + JOB'].map(dailyCsvCell).join(';'));lines.push(['Afdeling','Blok','Jobcode','Job','Workstream','Ha P4','Worker Unik'].map(dailyCsvCell).join(';'));[...jobMap.values()].sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.jobcode.localeCompare(b.jobcode)).forEach(x=>lines.push([x.afdeling,x.block,x.jobcode,x.job,x.ws,x.ha,x.workers.size].map(dailyCsvCell).join(';')));
  lines.push('');lines.push(['DETAIL RACUN'].map(dailyCsvCell).join(';'));lines.push(['Afdeling','Blok','Type','Material','UOM','Qty','Cost Racun'].map(dailyCsvCell).join(';'));[...materialMap.values()].sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).forEach(x=>lines.push([x.afdeling,x.block,x.type,x.material,x.uom,x.qty,x.cost].map(dailyCsvCell).join(';')));
- const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`AMIRA_Daily_${date}_${afd}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`AMIRA_Daily_${date}_${afd}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 
@@ -646,14 +646,14 @@ async function monthlyHistoricalRows(bounds){
    for(let i=1;i<=6;i++){
     const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]),qty=num(r['QTYMAT'+i]||r['QTY'+i]);if(!mc||!qty)continue;
     const md=localMats.get(mc)||{},name=md.DESCRIPTION||mc,uom=String(md.UOM||'').toUpperCase(),gram=monthlyIsGram(uom);
-    blocks.forEach(b=>{const share=p4[b]/tot,q=qty*share,x=ensureBlock(b);if(gram)x.racunGr+=q;else x.racunL+=q;const bp=monthlyBasePrice(b,name,uom);if(bp)x.cost+=gram?(q/1000)*bp.price:q*bp.price;});
+    blocks.forEach(b=>{const share=p4[b]/tot,q=qty*share,x=ensureBlock(b);const bp=monthlyBasePrice(b,name,uom);const cc=bp?(gram?(q/1000)*bp.price:q*bp.price):0;if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;});
    }
   });
   Object.values(blockMap).forEach(x=>out.push({date,...x}));
  }
  return out;
 }
-function monthlyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');const s=String(v);return `"${s.replace(/"/g,'""')}"`;}
+function monthlyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v)){let s=String(v);if(/[eE]/.test(s))s=v.toFixed(10);s=s.replace(/0+$/,'').replace(/\.$/,'');return s.replace('.',',');}const s=String(v).replace(/\r?\n/g,' ').replace(/"/g,'""');return `"${s}"`;}
 function csvExcelJoin(values){return values.map(monthlyCsvCell).join(';')}
 function monthlyDownload(rows,afRows,bounds,umk,days,afd){
  const hkRate=days>0?umk/days:0;
@@ -662,11 +662,11 @@ function monthlyDownload(rows,afRows,bounds,umk,days,afd){
  lines.push(['Filter Afdeling',afd||'Semua Afdeling','UMK 2026',Math.round(umk),'HK/Bulan',days,'Nilai 1 HK',Math.round(hkRate)].map(monthlyCsvCell).join(';'));
  lines.push('');
  lines.push(['DETAIL PER BLOK'].map(monthlyCsvCell).join(';'));
- lines.push(['Afdeling','Blok','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun','Racun/Ha','Total Cost/Ha','Hari Aktif'].map(monthlyCsvCell).join(';'));
- rows.forEach(r=>{const costHK=r.hk*hkRate,costHa=r.ha?costHK/r.ha:0,racunHa=r.ha?r.cost/r.ha:0,totalHa=r.ha?(costHK+r.cost)/r.ha:0;lines.push([r.afdeling,r.block,r.ha,r.hk,costHK,costHa,r.racunL,r.racunGr,r.cost,racunHa,totalHa,r.days?.size||0].map(monthlyCsvCell).join(';'));});
+ lines.push(['Afdeling','Blok','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun L','Cost Racun GR (Rp/KG)','Total Cost Racun','Racun/Ha','Total Cost/Ha','Hari Aktif'].map(monthlyCsvCell).join(';'));
+ rows.forEach(r=>{const costHK=r.hk*hkRate,costHa=r.ha?costHK/r.ha:0,racunHa=r.ha?r.cost/r.ha:0,totalHa=r.ha?(costHK+r.cost)/r.ha:0;lines.push([r.afdeling,r.block,r.ha,r.hk,costHK,costHa,r.racunL,r.racunGr,r.costL||0,r.costGr||0,r.cost,racunHa,totalHa,r.days?.size||0].map(monthlyCsvCell).join(';'));});
  lines.push('');lines.push(['REKAP AFDELING'].map(monthlyCsvCell).join(';'));
- lines.push(['Afdeling','Blok Aktif','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun','Racun/Ha','Total Cost/Ha'].map(monthlyCsvCell).join(';'));
- afRows.forEach(r=>{const costHK=r.hk*hkRate,costHa=r.ha?costHK/r.ha:0,racunHa=r.ha?r.cost/r.ha:0,totalHa=r.ha?(costHK+r.cost)/r.ha:0;lines.push([r.afdeling,r.blocks,r.ha,r.hk,costHK,costHa,r.racunL,r.racunGr,r.cost,racunHa,totalHa].map(monthlyCsvCell).join(';'));});
+ lines.push(['Afdeling','Blok Aktif','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun L','Cost Racun GR (Rp/KG)','Total Cost Racun','Racun/Ha','Total Cost/Ha'].map(monthlyCsvCell).join(';'));
+ afRows.forEach(r=>{const costHK=r.hk*hkRate,costHa=r.ha?costHK/r.ha:0,racunHa=r.ha?r.cost/r.ha:0,totalHa=r.ha?(costHK+r.cost)/r.ha:0;lines.push([r.afdeling,r.blocks,r.ha,r.hk,costHK,costHa,r.racunL,r.racunGr,r.costL||0,r.costGr||0,r.cost,racunHa,totalHa].map(monthlyCsvCell).join(';'));});
  lines.push('');lines.push(['Catatan','HK = unique worker × tanggal; worker yang sama pada beberapa item kerja di hari yang sama dihitung 1 HK. Cost HK dialokasikan ke blok berdasarkan proporsi P4.'].map(monthlyCsvCell).join(';'));
  const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`AMIRA_Monthly_${bounds.start}_to_${bounds.end}${afd?'_'+afd:''}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
@@ -678,15 +678,15 @@ async function renderMonthly(){
  const bounds=monthlyPeriodBounds(sel.value);if(!bounds)return;
  const afd=afdSel?.value||'',umk=Math.max(0,num($('monthlyUmk')?.value)||3909005),days=Math.max(1,Math.min(31,Math.round(num($('monthlyWorkDays')?.value)||25))),hkRate=umk/days;
  const rows=(await monthlyHistoricalRows(bounds)).filter(r=>!afd||r.afdeling===afd);
- const map={};rows.forEach(r=>{const k=[r.afdeling,r.block].join('|');map[k]??={afdeling:r.afdeling,block:r.block,ha:0,hk:0,racunL:0,racunGr:0,cost:0,days:new Set()};const x=map[k];x.ha+=r.ha||0;x.hk+=r.hk||0;x.racunL+=r.racunL||0;x.racunGr+=r.racunGr||0;x.cost+=r.cost||0;(r.days||new Set()).forEach(d=>x.days.add(d));});
+ const map={};rows.forEach(r=>{const k=[r.afdeling,r.block].join('|');map[k]??={afdeling:r.afdeling,block:r.block,ha:0,hk:0,racunL:0,racunGr:0,cost:0,days:new Set()};const x=map[k];x.ha+=r.ha||0;x.hk+=r.hk||0;x.racunL+=r.racunL||0;x.racunGr+=r.racunGr||0;x.costL+=(r.costL||0);x.costGr+=(r.costGr||0);x.cost+=r.cost||0;(r.days||new Set()).forEach(d=>x.days.add(d));});
  const blocks=Object.values(map).sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true}));
- const af={};blocks.forEach(r=>{af[r.afdeling]??={afdeling:r.afdeling,blocks:0,ha:0,hk:0,racunL:0,racunGr:0,cost:0};const x=af[r.afdeling];x.blocks++;x.ha+=r.ha;x.hk+=r.hk;x.racunL+=r.racunL;x.racunGr+=r.racunGr;x.cost+=r.cost;});
- const total=blocks.reduce((a,r)=>{a.ha+=r.ha;a.hk+=r.hk;a.racunL+=r.racunL;a.racunGr+=r.racunGr;a.cost+=r.cost;return a},{ha:0,hk:0,racunL:0,racunGr:0,cost:0});
+ const af={};blocks.forEach(r=>{af[r.afdeling]??={afdeling:r.afdeling,blocks:0,ha:0,hk:0,racunL:0,racunGr:0,cost:0};const x=af[r.afdeling];x.blocks++;x.ha+=r.ha;x.hk+=r.hk;x.racunL+=r.racunL;x.racunGr+=r.racunGr;x.costL+=(r.costL||0);x.costGr+=(r.costGr||0);x.cost+=r.cost;});
+ const total=blocks.reduce((a,r)=>{a.ha+=r.ha;a.hk+=r.hk;a.racunL+=r.racunL;a.racunGr+=r.racunGr;a.costL+=(r.costL||0);a.costGr+=(r.costGr||0);a.cost+=r.cost;return a},{ha:0,hk:0,racunL:0,racunGr:0,costL:0,costGr:0,cost:0});
  const totalCostHK=total.hk*hkRate,totalCost=totalCostHK+total.cost,totalCostHa=total.ha?totalCost/total.ha:0,totalHKHa=total.ha?totalCostHK/total.ha:0,totalRacunHa=total.ha?total.cost/total.ha:0;
- $('monthlyKpis').innerHTML=`<div class="detailKpi"><small>Periode Buku</small><b>${bounds.label}</b></div><div class="detailKpi"><small>Total Ha</small><b>${fmt(total.ha)} Ha</b></div><div class="detailKpi"><small>Total HK</small><b>${fmt(total.hk)}</b></div><div class="detailKpi"><small>Nilai 1 HK</small><b>Rp ${fmt(Math.round(hkRate))}</b><small>UMK Rp ${fmt(umk)} ÷ ${days} HK</small></div><div class="detailKpi"><small>Cost HK</small><b>Rp ${fmt(Math.round(totalCostHK))}</b></div><div class="detailKpi"><small>Cost Racun</small><b>Rp ${fmt(Math.round(total.cost))}</b></div><div class="detailKpi"><small>Cost HK/Ha</small><b>Rp ${fmt(Math.round(totalHKHa))}</b></div><div class="detailKpi"><small>Racun/Ha</small><b>Rp ${fmt(Math.round(totalRacunHa))}</b></div><div class="detailKpi"><small>Total Cost/Ha</small><b>Rp ${fmt(Math.round(totalCostHa))}</b></div>`;
+ $('monthlyKpis').innerHTML=`<div class="detailKpi"><small>Periode Buku</small><b>${bounds.label}</b></div><div class="detailKpi"><small>Total Ha</small><b>${fmt(total.ha)} Ha</b></div><div class="detailKpi"><small>Total HK</small><b>${fmt(total.hk)}</b></div><div class="detailKpi"><small>Nilai 1 HK</small><b>Rp ${fmt(Math.round(hkRate))}</b><small>UMK Rp ${fmt(umk)} ÷ ${days} HK</small></div><div class="detailKpi"><small>Cost HK</small><b>Rp ${fmt(Math.round(totalCostHK))}</b></div><div class="detailKpi"><small>Cost Racun L</small><b>Rp ${fmt(Math.round(total.costL||0))}</b><small>Rp/L</small></div><div class="detailKpi"><small>Cost Racun GR</small><b>Rp ${fmt(Math.round(total.costGr||0))}</b><small>GR ÷ 1.000 × Rp/KG</small></div><div class="detailKpi"><small>Total Cost Racun</small><b>Rp ${fmt(Math.round(total.cost))}</b></div><div class="detailKpi"><small>Cost HK/Ha</small><b>Rp ${fmt(Math.round(totalHKHa))}</b></div><div class="detailKpi"><small>Racun/Ha</small><b>Rp ${fmt(Math.round(totalRacunHa))}</b></div><div class="detailKpi"><small>Total Cost/Ha</small><b>Rp ${fmt(Math.round(totalCostHa))}</b></div>`;
  $('monthlyRowsLabel').textContent=`${blocks.length} blok`;
- $('monthlyBlockTable').innerHTML=blocks.map(r=>{const ch=r.hk*hkRate,chha=r.ha?ch/r.ha:0,rha=r.ha?r.cost/r.ha:0,t=r.ha?(ch+r.cost)/r.ha:0;return`<tr><td>${r.afdeling}</td><td><b>${r.block}</b></td><td>${fmt(r.ha)}</td><td>${fmt(r.hk)}</td><td>Rp ${fmt(Math.round(ch))}</td><td>Rp ${fmt(Math.round(chha))}</td><td>${fmt(r.racunL)}</td><td>${fmt(r.racunGr)}</td><td>Rp ${fmt(Math.round(r.cost))}</td><td>Rp ${fmt(Math.round(rha))}</td><td><b>Rp ${fmt(Math.round(t))}</b></td><td>${r.days?.size||0}</td></tr>`}).join('')||`<tr><td colspan="12" class="empty">Belum ada dataset LOCKED pada periode ${bounds.label}.</td></tr>`;
- $('monthlyAfdelingTable').innerHTML=Object.values(af).sort((a,b)=>a.afdeling.localeCompare(b.afdeling)).map(r=>{const ch=r.hk*hkRate,chha=r.ha?ch/r.ha:0,rha=r.ha?r.cost/r.ha:0,t=r.ha?(ch+r.cost)/r.ha:0;return`<tr><td><b>${r.afdeling}</b></td><td>${fmt(r.blocks)}</td><td>${fmt(r.ha)}</td><td>${fmt(r.hk)}</td><td>Rp ${fmt(Math.round(ch))}</td><td>Rp ${fmt(Math.round(chha))}</td><td>${fmt(r.racunL)}</td><td>${fmt(r.racunGr)}</td><td>Rp ${fmt(Math.round(r.cost))}</td><td>Rp ${fmt(Math.round(rha))}</td><td><b>Rp ${fmt(Math.round(t))}</b></td></tr>`}).join('')||`<tr><td colspan="11" class="empty">Belum ada data.</td></tr>`;
+ $('monthlyBlockTable').innerHTML=blocks.map(r=>{const ch=r.hk*hkRate,chha=r.ha?ch/r.ha:0,rha=r.ha?r.cost/r.ha:0,t=r.ha?(ch+r.cost)/r.ha:0;return`<tr><td>${r.afdeling}</td><td><b>${r.block}</b></td><td>${fmt(r.ha)}</td><td>${fmt(r.hk)}</td><td>Rp ${fmt(Math.round(ch))}</td><td>Rp ${fmt(Math.round(chha))}</td><td>${fmt(r.racunL)}</td><td>${fmt(r.racunGr)}</td><td>Rp ${fmt(Math.round(r.costL||0))}</td><td>Rp ${fmt(Math.round(r.costGr||0))}</td><td>Rp ${fmt(Math.round(r.cost))}</td><td>Rp ${fmt(Math.round(rha))}</td><td><b>Rp ${fmt(Math.round(t))}</b></td><td>${r.days?.size||0}</td></tr>`}).join('')||`<tr><td colspan="12" class="empty">Belum ada dataset LOCKED pada periode ${bounds.label}.</td></tr>`;
+ $('monthlyAfdelingTable').innerHTML=Object.values(af).sort((a,b)=>a.afdeling.localeCompare(b.afdeling)).map(r=>{const ch=r.hk*hkRate,chha=r.ha?ch/r.ha:0,rha=r.ha?r.cost/r.ha:0,t=r.ha?(ch+r.cost)/r.ha:0;return`<tr><td><b>${r.afdeling}</b></td><td>${fmt(r.blocks)}</td><td>${fmt(r.ha)}</td><td>${fmt(r.hk)}</td><td>Rp ${fmt(Math.round(ch))}</td><td>Rp ${fmt(Math.round(chha))}</td><td>${fmt(r.racunL)}</td><td>${fmt(r.racunGr)}</td><td>Rp ${fmt(Math.round(r.costL||0))}</td><td>Rp ${fmt(Math.round(r.costGr||0))}</td><td>Rp ${fmt(Math.round(r.cost))}</td><td>Rp ${fmt(Math.round(rha))}</td><td><b>Rp ${fmt(Math.round(t))}</b></td></tr>`}).join('')||`<tr><td colspan="11" class="empty">Belum ada data.</td></tr>`;
  window.__amiraMonthly={blocks,afRows:Object.values(af),bounds,umk,days,afd};
 }
 function downloadMonthlyBlockRows(){
@@ -789,92 +789,7 @@ function initMonthly(){
  rer();
 }
 async function switchMainAfdeling(afd){afd=afdelingLabel(afd);if(!afd||afd==='MULTI')return;const snaps=await allSnaps();const candidates=snaps.filter(s=>afdelingLabel(snapAfdeling(s))===afd).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.lockedAt||'').localeCompare(String(a.lockedAt||'')));const currentDraft=state.dataset.status==='DRAFT'&&state.files.length;if(currentDraft){alert('Selesaikan atau jangan ubah dataset DRAFT aktif sebelum berpindah afdeling.');const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}if(!candidates[0]){alert(`Belum ada historical dataset untuk ${afd}. Upload dan LOCK dataset ${afd} terlebih dahulu.`);const el=$('mainAfdelingFilter');if(el)el.value=afdelingLabel(state.dataset.afdeling||state.ui.afdeling||'OCYM');return}await loadSnap(candidates[0]);}
-function initMultiAfdeling(){
- const rer=()=>{
-   multiAfdelingState.site=$('multiSiteFilter')?.value||'';
-   multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';
-   multiAfdelingState.period=$('multiPeriodFilter')?.value||'';
-   multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';
-   renderMultiAfdeling();
- };
- ['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiHaBasis','multiWorkstreamFilter'].forEach(id=>{
-   const el=$(id);
-   if(el)el.onchange=rer;
- });
- const monthBtn=$('multiDownloadMonthBtn');
- if(monthBtn){
-   monthBtn.onclick=async e=>{
-     e.preventDefault();
-     try{
-       const current=await renderMultiAfdeling();
-       const rows=multiFilterRowsByWorkstream((multiAfdelingState.rows||[]).filter(r=>
-         (!multiAfdelingState.site||r.site===multiAfdelingState.site)&&
-         (!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling)
-       ));
-       const ws=multiSelectedWorkstream();
-       multiDownload(
-         rows,
-         `AMIRA_Multi_Afdeling_Akumulasi_${multiCurrentMonthKey()}_${ws||'ALL_WS'}.csv`,
-         'AMIRA MULTI AFDELING · AKUMULASI BULAN BERJALAN',
-         {start:multiAfdelingState.monthStart,end:multiAfdelingState.monthEnd,date:multiAfdelingState.monthEnd}
-       );
-     }catch(err){
-       console.error('Download Akumulasi Multi Afdeling:',err);
-       alert('Download gagal: '+(err?.message||err));
-     }
-   };
- }
- const dailyBtn=$('multiDownloadDailyBtn');
- if(dailyBtn){
-   dailyBtn.onclick=async e=>{
-     e.preventDefault();
-     try{
-       await renderMultiAfdeling();
-       const date=multiAfdelingState.period||multiAfdelingState.monthEnd;
-       const rows=multiFilterRowsByWorkstream((multiAfdelingState.dailyRows||[]).filter(r=>
-         (!multiAfdelingState.site||r.site===multiAfdelingState.site)&&
-         (!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling)
-       ));
-       multiDownload(
-         rows,
-         `AMIRA_Multi_Afdeling_Daily_${date||'NA'}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,
-         'AMIRA MULTI AFDELING · LAPORAN DAILY',
-         {date,start:date,end:date}
-       );
-     }catch(err){
-       console.error('Download Daily Multi Afdeling:',err);
-       alert('Download gagal: '+(err?.message||err));
-     }
-   };
- }
- ['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{
-   const el=$(id);
-   if(el)el.onchange=()=>{
-     multiAfdelingState.site=$('dashboardSiteFilter')?.value||multiAfdelingState.site||'';
-     multiAfdelingState.afdeling=$('dashboardAfdelingFilter')?.value||multiAfdelingState.afdeling||'';
-     multiAfdelingState.basis=$('dashboardHaBasis')?.value||'HESTI';
-     renderMultiAfdeling();
-   };
- });
- const mainAf=$('mainAfdelingFilter');
- if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);
- const reset=$('dashboardMultiReset');
- if(reset)reset.onclick=e=>{
-   e.preventDefault();
-   ['dashboardAfdelingFilter','dashboardSiteFilter','multiSiteFilter','multiAfdelingFilter'].forEach(id=>{
-     if($(id))$(id).value='';
-   });
-   if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';
-   if($('multiWorkstreamFilter'))$('multiWorkstreamFilter').value='';
-   if($('multiPeriodFilter'))$('multiPeriodFilter').value='';
-   multiAfdelingState.site='';
-   multiAfdelingState.afdeling='';
-   multiAfdelingState.period='';
-   multiAfdelingState.basis='HESTI';
-   renderMultiAfdeling();
- };
- renderMultiAfdeling();
-}
+function initMultiAfdeling(){const rer=()=>{multiAfdelingState.site=$('multiSiteFilter')?.value||'';multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';multiAfdelingState.period=$('multiPeriodFilter')?.value||'';multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';renderMultiAfdeling()};['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=rer});['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{multiAfdelingState.basis=$('dashboardHaBasis')?.value||'HESTI';renderMultiAfdeling()}});const mainAf=$('mainAfdelingFilter');if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);$('dashboardMultiReset')?.addEventListener('click',()=>{['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';multiAfdelingState.site='';multiAfdelingState.afdeling='';multiAfdelingState.period='';multiAfdelingState.basis='HESTI';renderMultiAfdeling()});renderMultiAfdeling()}
 function isPupukJob(code){
  const c=clean(code),j=job(c)||{},n=String(j.DESCRIPTION||'').toUpperCase(),cg=String(j.KODECGP||j.CGP||j.KODE_CGP||'').toUpperCase();
  return cg==='PUPUK'||cg.includes('PUPUK')||/PUPUK|FERTIL/.test(n);
