@@ -766,19 +766,97 @@ function initMultiAfdeling(){
    multiAfdelingState.afdeling=$('multiAfdelingFilter')?.value||'';
    multiAfdelingState.period=$('multiPeriodFilter')?.value||'';
    multiAfdelingState.basis=$('multiHaBasis')?.value||'HESTI';
-   const dbAf=$('dashboardAfdelingFilter');if(dbAf&&dbAf.value!==multiAfdelingState.afdeling)dbAf.value=multiAfdelingState.afdeling||'';
-   renderMultiAfdeling();
+   const dbAf=$('dashboardAfdelingFilter');
+   if(dbAf&&dbAf.value!==multiAfdelingState.afdeling)dbAf.value=multiAfdelingState.afdeling||'';
+   renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));
  };
  ['multiSiteFilter','multiAfdelingFilter','multiPeriodFilter','multiHaBasis','multiWorkstreamFilter'].forEach(id=>{const el=$(id);if(el)el.onchange=rer;});
- ['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{if(id==='dashboardAfdelingFilter'){const v=el.value||'';const mf=$('multiAfdelingFilter');if(mf)mf.value=v;multiAfdelingState.afdeling=v;}if(id==='dashboardSiteFilter'){const v=el.value||'';const mf=$('multiSiteFilter');if(mf)mf.value=v;multiAfdelingState.site=v;}multiAfdelingState.basis=$('dashboardHaBasis')?.value||multiAfdelingState.basis||'HESTI';renderMultiAfdeling();};});
- const mainAf=$('mainAfdelingFilter');if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);
- const selectedRows=()=>multiFilterRowsByWorkstream((multiAfdelingState.rows||[]).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling)));
+ ['dashboardAfdelingFilter','dashboardSiteFilter','dashboardHaBasis'].forEach(id=>{
+   const el=$(id);
+   if(el)el.onchange=()=>{
+     if(id==='dashboardAfdelingFilter'){
+       const v=el.value||'',mf=$('multiAfdelingFilter');
+       if(mf)mf.value=v;
+       multiAfdelingState.afdeling=v;
+     }
+     if(id==='dashboardSiteFilter'){
+       const v=el.value||'',mf=$('multiSiteFilter');
+       if(mf)mf.value=v;
+       multiAfdelingState.site=v;
+     }
+     multiAfdelingState.basis=$('dashboardHaBasis')?.value||multiAfdelingState.basis||'HESTI';
+     renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));
+   };
+ });
+ const mainAf=$('mainAfdelingFilter');
+ if(mainAf)mainAf.onchange=()=>switchMainAfdeling(mainAf.value);
+
+ const selectedRows=()=>multiFilterRowsByWorkstream((multiAfdelingState.rows||[]).filter(r=>
+   (!multiAfdelingState.site||r.site===multiAfdelingState.site)&&
+   (!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling)
+ ));
  const book=()=>multiBookPeriodBounds();
- const monthBtn=$('multiDownloadMonthBtn');if(monthBtn)monthBtn.onclick=()=>{const b=book(),rows=selectedRows();multiDownload(rows,`AMIRA_Multi_Afdeling_Akumulasi_Periode_${multiCurrentMonthKey()}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,'AMIRA MULTI AFDELING · AKUMULASI PERIODE BUKU',{start:b.start,end:b.end,date:b.end});};
- const dailyBtn=$('multiDownloadDailyBtn');if(dailyBtn)dailyBtn.onclick=()=>{const b=book(),rows=multiFilterRowsByWorkstream((multiAfdelingState.dailyRows||[]).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling)));multiDownload(rows,`AMIRA_Multi_Afdeling_Akumulasi_Harian_${multiSelectedWorkstream()||'ALL_WS'}.csv`,'AMIRA MULTI AFDELING · AKUMULASI HARIAN',{start:b.start,end:b.end,date:'SEMUA TANGGAL'});};
- const todayBtn=$('multiDownloadTodayBtn');if(todayBtn)todayBtn.onclick=()=>{const b=book(),today=new Date().toISOString().slice(0,10),items=(multiAfdelingState.allItems||[]).filter(x=>x.date>=b.start&&x.date<=today),rows=multiRowsFromItems(items).filter(r=>(!multiAfdelingState.site||r.site===multiAfdelingState.site)&&(!multiAfdelingState.afdeling||r.afdeling===multiAfdelingState.afdeling));multiDownload(multiFilterRowsByWorkstream(rows),`AMIRA_Multi_Afdeling_Sampai_Hari_Ini_${today}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,'AMIRA MULTI AFDELING · SAMPAI DENGAN HARI INI',{start:b.start,end:today,date:today});};
- $('dashboardMultiReset')?.addEventListener('click',()=>{['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';if($('multiWorkstreamFilter'))$('multiWorkstreamFilter').value='';multiAfdelingState.site='';multiAfdelingState.afdeling='';multiAfdelingState.period='';multiAfdelingState.basis='HESTI';renderMultiAfdeling();});
- renderMultiAfdeling();
+ const todayISO=()=>new Date().toISOString().slice(0,10);
+ const filterControls=(rows)=>{
+   const af=$('multiAfdelingFilter')?.value||'',site=$('multiSiteFilter')?.value||'';
+   let out=rows.filter(r=>(!af||r.afdeling===af)&&(!site||r.site===site));
+   return multiFilterRowsByWorkstream(out);
+ };
+
+ const monthBtn=$('multiDownloadMonthBtn');
+ if(monthBtn)monthBtn.onclick=async()=>{
+   try{
+     const b=book(),items=await historicalWorkRows();
+     const rows=filterControls(multiRowsFromItems(items.filter(x=>x.date>=b.start&&x.date<=b.end)));
+     multiDownload(rows,
+       `AMIRA_Multi_Afdeling_Akumulasi_Periode_${b.start}_to_${b.end}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,
+       'AMIRA MULTI AFDELING · AKUMULASI PERIODE BUKU',
+       {start:b.start,end:b.end,date:b.end});
+   }catch(e){console.error(e);alert('Download Multi Afdeling gagal: '+(e?.message||e));}
+ };
+
+ const dailyBtn=$('multiDownloadDailyBtn');
+ if(dailyBtn)dailyBtn.onclick=async()=>{
+   try{
+     const b=book(),items=await historicalWorkRows();
+     const periodItems=items.filter(x=>x.date>=b.start&&x.date<=b.end);
+     const dates=[...new Set(periodItems.map(x=>x.date).filter(Boolean))].sort();
+     let rows=[];
+     for(const date of dates){
+       filterControls(multiDailyRowsFromItems(periodItems,date)).forEach(r=>rows.push({...r,date}));
+     }
+     multiDownload(rows,
+       `AMIRA_Multi_Afdeling_Akumulasi_Harian_${b.start}_to_${b.end}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,
+       'AMIRA MULTI AFDELING · AKUMULASI HARIAN',
+       {start:b.start,end:b.end,date:'SEMUA TANGGAL'});
+   }catch(e){console.error(e);alert('Download Akumulasi Harian gagal: '+(e?.message||e));}
+ };
+
+ const todayBtn=$('multiDownloadTodayBtn');
+ if(todayBtn)todayBtn.onclick=async()=>{
+   try{
+     const b=book(),today=todayISO(),through=today<b.end?today:b.end,items=await historicalWorkRows();
+     const rows=filterControls(multiRowsFromItems(items.filter(x=>x.date>=b.start&&x.date<=through)));
+     multiDownload(rows,
+       `AMIRA_Multi_Afdeling_Sampai_Hari_Ini_${through}_${multiSelectedWorkstream()||'ALL_WS'}.csv`,
+       'AMIRA MULTI AFDELING · SAMPAI DENGAN HARI INI',
+       {start:b.start,end:through,date:through});
+   }catch(e){console.error(e);alert('Download Sampai Dengan Hari Ini gagal: '+(e?.message||e));}
+ };
+
+ $('dashboardMultiReset')?.addEventListener('click',()=>{
+   ['dashboardAfdelingFilter','dashboardSiteFilter'].forEach(id=>{if($(id))$(id).value=''});
+   if($('dashboardHaBasis'))$('dashboardHaBasis').value='HESTI';
+   if($('multiAfdelingFilter'))$('multiAfdelingFilter').value='';
+   if($('multiSiteFilter'))$('multiSiteFilter').value='';
+   if($('multiWorkstreamFilter'))$('multiWorkstreamFilter').value='';
+   multiAfdelingState.site='';
+   multiAfdelingState.afdeling='';
+   multiAfdelingState.period='';
+   multiAfdelingState.basis='HESTI';
+   renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));
+ });
+ renderMultiAfdeling().catch(e=>console.warn('Multi Afdeling:',e));
 }
 
 function isPupukJob(code){
@@ -1055,69 +1133,4 @@ $('masterInput').onchange=async e=>{try{if(e.target.files[0])await uploadMaster(
 $('today').textContent=state.dataset?.date?new Date(state.dataset.date+'T00:00:00').toLocaleDateString('id-ID',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}):'—';
 (async()=>{try{let arr=await allSnaps();if(arr[0])await loadSnap(arr[0]);else renderAll()}catch(e){console.warn(e);renderAll()}})();
 })();
-
-/* AMIRA MULTI AFDELING DOWNLOAD HARDENING */
-(function(){
-  function wireMultiDownloads(){
-    const monthBtn=document.getElementById('multiDownloadMonthBtn');
-    const dailyBtn=document.getElementById('multiDownloadDailyBtn');
-    const todayBtn=document.getElementById('multiDownloadTodayBtn');
-    if(monthBtn) monthBtn.onclick=async function(e){
-      e.preventDefault();
-      try{
-        const items=await historicalWorkRows();
-        const today=new Date().toISOString().slice(0,10);
-        const special=today>='2026-08-18'&&today<='2026-09-20';
-        const start=special?'2026-08-18':(today.slice(8)>= '21'
-          ? today.slice(0,8)+'21'
-          : new Date(Date.UTC(new Date(today).getUTCFullYear(),new Date(today).getUTCMonth()-1,21)).toISOString().slice(0,10));
-        const end=special?'2026-09-20':(today.slice(8)>= '21'
-          ? new Date(Date.UTC(new Date(today).getUTCFullYear(),new Date(today).getUTCMonth()+1,20)).toISOString().slice(0,10)
-          : today.slice(0,8)+'20');
-        const through=today<end?today:end;
-        let rows=multiRowsFromItems(items.filter(x=>x.date>=start&&x.date<=through));
-        const af=document.getElementById('multiAfdelingFilter')?.value||'';
-        const site=document.getElementById('multiSiteFilter')?.value||'';
-        const ws=document.getElementById('multiWorkstreamFilter')?.value||'';
-        if(af) rows=rows.filter(r=>r.afdeling===af);
-        if(site) rows=rows.filter(r=>r.site===site);
-        if(ws) rows=rows.filter(r=>{
-          const key=ws.toLowerCase();
-          return (key==='cpt'?r.cpt:key==='cwm'?r.cwm:key==='wdc'?r.wdc:key==='wdm'?r.wdm:key==='pupuk'?r.pupuk:key==='pruning'?r.pruning:r.other)>0;
-        });
-        multiDownload(rows,`AMIRA_Multi_Afdeling_Sampai_Hari_Ini_${today}.csv`,'AMIRA MULTI AFDELING — SAMPAI DENGAN HARI INI',{date:today,start,end:through});
-      }catch(err){console.error(err);alert('Download Multi Afdeling gagal: '+(err?.message||err));}
-    };
-    if(dailyBtn) dailyBtn.onclick=async function(e){
-      e.preventDefault();
-      try{
-        const items=await historicalWorkRows();
-        const dates=[...new Set(items.map(x=>x.date).filter(Boolean))].sort();
-        const af=document.getElementById('multiAfdelingFilter')?.value||'';
-        const site=document.getElementById('multiSiteFilter')?.value||'';
-        const ws=document.getElementById('multiWorkstreamFilter')?.value||'';
-        let rows=[];
-        dates.forEach(date=>{
-          let rr=multiDailyRowsFromItems(items,date);
-          if(af) rr=rr.filter(r=>r.afdeling===af);
-          if(site) rr=rr.filter(r=>r.site===site);
-          if(ws) rr=rr.filter(r=>{
-            const key=ws.toLowerCase();
-            return (key==='cpt'?r.cpt:key==='cwm'?r.cwm:key==='wdc'?r.wdc:key==='wdm'?r.wdm:key==='pupuk'?r.pupuk:key==='pruning'?r.pruning:r.other)>0;
-          });
-          rr.forEach(r=>r.date=date);
-          rows.push(...rr);
-        });
-        multiDownload(rows,`AMIRA_Multi_Afdeling_Akumulasi_Harian_${new Date().toISOString().slice(0,10)}.csv`,'AMIRA MULTI AFDELING — AKUMULASI HARIAN',{date:'Semua tanggal',start:dates[0]||'',end:dates[dates.length-1]||''});
-      }catch(err){console.error(err);alert('Download Akumulasi Harian gagal: '+(err?.message||err));}
-    };
-    if(todayBtn) todayBtn.onclick=function(){ 
-      const b=document.getElementById('multiDownloadMonthBtn'); if(b) b.click();
-    };
-  }
-  window.addEventListener('load',wireMultiDownloads);
-  setTimeout(wireMultiDownloads,500);
-  setTimeout(wireMultiDownloads,1500);
-})();
-
 </script></body></html>
