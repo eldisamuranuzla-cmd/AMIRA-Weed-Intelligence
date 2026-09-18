@@ -1255,4 +1255,88 @@ window.AMIRA_CALENDAR_V46_2={
 })();
 </script>
 
+
+<!-- AMIRA v46.2 CLEAN PATCH: download-only repairs.
+     Does not replace existing business logic. -->
+<script>
+(function(){
+  'use strict';
+
+  function tableData(selector){
+    const el = document.querySelector(selector);
+    const table = el ? (el.closest('table') || el.querySelector('table')) : null;
+    if(!table) return {head:[],body:[]};
+    const head = Array.from(table.querySelectorAll('thead tr')).map(tr =>
+      Array.from(tr.cells).map(td => (td.innerText||td.textContent||'').trim())
+    ).filter(r=>r.length);
+    const body = Array.from(table.querySelectorAll('tbody tr')).map(tr =>
+      Array.from(tr.cells).map(td => (td.innerText||td.textContent||'').trim())
+    ).filter(r=>r.length);
+    return {head:head[0]||[],body};
+  }
+
+  function csvEscape(v){
+    const s=String(v??'');
+    return '"' + s.replace(/"/g,'""') + '"';
+  }
+
+  function downloadCSV(name, data){
+    if(!data.head.length && !data.body.length){
+      alert('Data tabel belum tersedia.');
+      return;
+    }
+    const rows=[data.head,...data.body];
+    const csv='\uFEFF'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  // Material Balance: selectors are intentionally broad so existing table IDs/classes are preserved.
+  window.amiraDownloadMaterialBalanceCSV=function(){
+    const candidates=[
+      '#materialBalanceBody',
+      '#materialBalanceTable',
+      '[id*="materialBalance"] tbody'
+    ];
+    let data={head:[],body:[]};
+    for(const s of candidates){
+      data=tableData(s);
+      if(data.body.length || data.head.length) break;
+    }
+    if(!data.body.length){
+      const t=Array.from(document.querySelectorAll('table')).find(x=>/material\s*balance/i.test(x.innerText||''));
+      if(t) data={head:Array.from(t.querySelectorAll('thead tr')[0]?.cells||[]).map(x=>(x.innerText||'').trim()),body:Array.from(t.querySelectorAll('tbody tr')).map(tr=>Array.from(tr.cells).map(x=>(x.innerText||'').trim())).filter(r=>r.length)};
+    }
+    downloadCSV('AMIRA_Material_Balance.csv',data);
+  };
+
+  // Add missing buttons only when a Material Balance section is present and no existing download button exists.
+  function ensureMaterialBalanceButtons(){
+    const title=Array.from(document.querySelectorAll('h1,h2,h3,h4,.sectionTitle,.cardTitle')).find(e=>/material\s*balance/i.test(e.innerText||''));
+    if(!title) return;
+    const container=title.closest('section,.card,.panel,div')||title.parentElement;
+    if(!container || container.querySelector('[data-amira-mb-downloads]')) return;
+    const bar=document.createElement('div');
+    bar.setAttribute('data-amira-mb-downloads','1');
+    bar.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin:8px 0;';
+    const b=document.createElement('button');
+    b.type='button'; b.className='btn downloadBtn';
+    b.textContent='Download CSV';
+    b.onclick=window.amiraDownloadMaterialBalanceCSV;
+    bar.appendChild(b);
+    title.insertAdjacentElement('afterend',bar);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',ensureMaterialBalanceButtons);
+  else ensureMaterialBalanceButtons();
+  new MutationObserver(ensureMaterialBalanceButtons).observe(document.documentElement,{childList:true,subtree:true});
+})();
+</script>
+
 </body></html>
