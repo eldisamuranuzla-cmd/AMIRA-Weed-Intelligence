@@ -341,17 +341,31 @@ async function uploadRaw(files){if(!files?.length)return;if(files.length>4)throw
 function updateControl(){const locked=state.dataset.status==='LOCKED'||state.dataset.locked;const st=$('datasetStatus'),meta=$('datasetMeta');st.textContent=locked?'LOCKED':'DRAFT';st.className='status '+(locked?'locked':'draft');meta.textContent=state.dataset.date?`Tanggal ${state.dataset.date} · ${state.files.length} file · maksimal 4 file Rawat · history lokal + cloud jika dikonfigurasi`: '1–4 file per dataset/afdeling · minimal 1 file untuk LOCKED · semua tanggal harus sama · history dipisahkan date + afdeling';$('lockBtn').disabled=locked||!state.files.length;$('lockBtn2').disabled=locked||!state.files.length;$('reopenBtn').style.display=locked?'inline-block':'none';const d=state.data||buildData();$('recon').innerHTML=state.files.length?`Tanggal <b>${state.dataset.date}</b> · EMPATT ${d.emp.length} · valid ${d.valid.length} · PLANHARIAN ${d.planCount} · T_SIC ${d.sicCount} · T_MATERIAL ${d.materialRows} · GPS ${d.gps.length}`:'Belum ada dataset staged.';}
 function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${s.files?.length||0} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
 async function lock(){if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);const d=state.data||buildData();if(!state.dataset.date)state.dataset.date=d.date;if(!state.dataset.date)throw new Error('Tanggal dataset belum terbaca.');const afd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');if(!AMIRA_AFDELING_OPTIONS.includes(afd))throw new Error(`Dataset harus tepat 1 afdeling (${AMIRA_AFDELING_OPTIONS.join(', ')}). Terdeteksi: ${afd||'—'}`);state.dataset={...state.dataset,status:'LOCKED',locked:true,afdeling:afd,id:`AMIRA-${state.dataset.date}-${afd}`};await saveSnapshotByDate(await snapshot());renderAll();}
-function dailyBasePrice(block,material,uom){
+function racunUnitClass(uom){
+ const u=String(uom||'').toUpperCase().replace(/\s+/g,'');
+ if(/^(GR|G|GRAM|GRAMS)(?:\/|$)/.test(u)||u.includes('GR/'))return'GR';
+ if(/^(L|LT|LTR|LITER|LITRE)(?:\/|$)/.test(u)||u.includes('L/HA')||u.includes('LTR/'))return'L';
+ return '';
+}
+function racunMaterialNorm(material){
  const n=String(material||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
  const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};
- const target=alias[n]||n, unit=String(uom||'').toUpperCase();
- const candidates=(BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===block && String(x.material||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===target);
- if(!candidates.length)return null;
- const gram=/GR|GRAM|G\b/.test(unit);
- const exact=candidates.find(x=>/GR|GRAM|G\b/.test(String(x.uom||'').toUpperCase())===gram);
- return exact||null;
+ return alias[n]||n;
 }
-function monthlyBasePrice(block,material,uom){return dailyBasePrice(block,material,uom);}
+function racunCost(qty,actualUom,base){
+ if(!base)return 0;
+ const au=racunUnitClass(actualUom),bu=racunUnitClass(base.uom);
+ if(!au||!bu||au!==bu)return 0;
+ const q=num(qty),price=num(base.price);
+ return au==='GR'?(q/1000)*price:q*price;
+}
+function dailyBasePrice(block,type,material,uom){
+ const target=racunMaterialNorm(material),unit=racunUnitClass(uom),internal=String(type||'').toUpperCase();
+ if(!block||!internal||!target||!unit)return null;
+ const candidates=(BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===block && String(x.type||'').toUpperCase()===internal && racunMaterialNorm(x.material)===target && racunUnitClass(x.uom)===unit);
+ return candidates[0]||null;
+}
+function monthlyBasePrice(block,type,material,uom){return dailyBasePrice(block,type,material,uom);}
 function dailyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');const s=String(v);return `"${s.replace(/"/g,'""')}"`;}
 function dailyCsvJoin(values){return values.map(dailyCsvCell).join(';')}
 function dailyDownload(){
@@ -363,7 +377,7 @@ function dailyDownload(){
  const workerDay=new Map();
  (d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE),p=num(r.P4);if(!b||!w||p<=0)return;const k=w+'|'+date;if(!workerDay.has(k))workerDay.set(k,{});workerDay.get(k)[b]=(workerDay.get(k)[b]||0)+p;ensure(b).ha+=p;});
  workerDay.forEach(shares=>{const tot=Object.values(shares).reduce((a,v)=>a+v,0);if(!tot)return;Object.entries(shares).forEach(([b,p])=>{const x=ensure(b),share=p/tot;x.hk+=share;x.costHK+=share*hkRate;});});
- (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);const bp=dailyBasePrice(b,a.displayMaterial||a.material,uom),cc=bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0;if(gram){x.racunGr+=qty;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=qty;x.costL=(x.costL||0)+cc;}x.costRacun+=cc;const k=[b,a.type,a.displayMaterial||a.material,uom].join('|');materialMap.set(k,{afdeling:x.afdeling,block:b,type:a.type,material:a.displayMaterial||a.material,uom,qty:(materialMap.get(k)?.qty||0)+qty,cost:(materialMap.get(k)?.cost||0)+(bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0)});});
+ (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);const bp=dailyBasePrice(b,a.type,a.displayMaterial||a.material,uom),cc=racunCost(qty,uom,bp);if(gram){x.racunGr+=qty;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=qty;x.costL=(x.costL||0)+cc;}x.costRacun+=cc;const k=[b,a.type,a.displayMaterial||a.material,uom].join('|');materialMap.set(k,{afdeling:x.afdeling,block:b,type:a.type,material:a.displayMaterial||a.material,uom,qty:(materialMap.get(k)?.qty||0)+qty,cost:(materialMap.get(k)?.cost||0)+(bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0)});});
  const blocks=[...blockMap.values()].sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true}));
  const jobMap=new Map();(d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),code=clean(r.JOBCODE),p=num(r.P4);if(!b||!code||p<=0)return;const k=[b,code].join('|');const z=jobMap.get(k)||{afdeling:afdelingLabel(afdelingOfBlock(b)),block:b,jobcode:code,job:job(code).DESCRIPTION||code,ws:classify(code,job(code).DESCRIPTION||''),ha:0,workers:new Set};z.ha+=p;const w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE);if(w)z.workers.add(w);jobMap.set(k,z);});
  const lines=[];lines.push(['AMIRA DATA HARIAN','Tanggal',date,'Afdeling',afd].map(dailyCsvCell).join(';'));lines.push(['UMK 2026',Math.round(umk),'HK/Bulan',days,'Nilai 1 HK',Math.round(hkRate)].map(dailyCsvCell).join(';'));lines.push('');lines.push(['REKAP PER BLOK'].map(dailyCsvCell).join(';'));lines.push(['Afdeling','Blok','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun L','Cost Racun GR (Rp/KG)','Total Cost Racun','Racun/Ha','Total Cost/Ha'].map(dailyCsvCell).join(';'));
@@ -419,12 +433,12 @@ async function amiraCumulativeMaterialActual(d){
          return bs.size===matSet.size && [...matSet].every(m=>bs.has(m));
        });
        if(candidates.length!==1)return;
-       const type=candidates[0], reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC', st=subtype(type);
+       const type=candidates[0], reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC', reportWorkstream=(jf==='CWC')?'CWC':(jc==='220401'||jc==='220402')?'PATH':(jc==='220503')?'TPH':(jf==='WDC'?'WDC':reportFamily), st=subtype(type);
        items.forEach(it=>{
          const mdesc=mat(it.code).DESCRIPTION||it.code, canonical=norm(mdesc);
          const k=[block,reportFamily,st,canonical].join('|'), q=it.qty*share, prev=out.get(k);
          if(prev)prev.actual+=q;
-         else out.set(k,{block,type:reportFamily,subtype:st,material:mdesc,canonical,actual:q,uom:mat(it.code).UOM||'—'});
+         else out.set(k,{block,type:reportFamily,workstream:reportWorkstream,subtype:st,material:mdesc,canonical,actual:q,uom:mat(it.code).UOM||'—'});
        });
      });
    });
@@ -460,7 +474,7 @@ let amiraBalanceFilter={afdeling:'',workstream:''};
 function renderCumulativeBalanceRows(){
  const el=$('balanceDetail'); if(!el)return;
  const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
- const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||(r.workstream||r.type)===ws));
  const info=$('balanceFilterInfo');
  if(info){const special=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09';info.textContent=`Material Balance: ${rows.length} baris · Afdeling: ${afd||'Semua'} · Workstream: ${ws||'Semua'} · Actual kumulatif ${special?'18 Agustus–20 September 2026 (khusus)':'periode 21–20'}.`; }
  el.innerHTML=rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
@@ -484,7 +498,7 @@ function balanceCsvCell(v){
 }
 function downloadCumulativeMaterialBalance(){
  const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
- const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||(r.workstream||r.type)===ws));
  if(!rows.length){alert('Tidak ada data Material Balance sesuai filter.');return;}
  const lines=[];
  const balancePeriodLabel=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09'?'18 Agustus 2026 – 20 September 2026':'21–20';lines.push(['AMIRA MATERIAL BALANCE KUMULATIF','Periode',balancePeriodLabel,'Afdeling',afd||'Semua Afdeling','Workstream',ws||'Semua'].map(balanceCsvCell).join(';'));
@@ -513,8 +527,11 @@ async function refreshCumulativeMaterialBalance(){
    const normBal=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const a={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return a[n]||n};
    const subtypeBal=t=>{const m=String(t||'').toUpperCase().match(/^(?:CWC|PTC|WDC)([1-4])$/);return m?m[1]:''};
    const agg=await amiraCumulativeMaterialActual(d);
-   if(!agg.size)return;
    const rows=[];
+   if(!agg.size){
+     if(amiraBalanceRows.length){initMaterialBalanceControls();renderCumulativeBalanceRows();}
+     return;
+   }
    const baseGroups=new Map();
    Object.values(d.prescriptionByBlock||{}).forEach(p=>{
      const internal=String(p.type||'').toUpperCase(), fam=internal.match(/^(CWC|PTC|WDC)/)?.[1]; if(!fam)return;
@@ -528,7 +545,7 @@ async function refreshCumulativeMaterialBalance(){
    agg.forEach(a=>{
      const b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));
      const base=num(b?.total), actual=num(a.actual), diff=actual-base, ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;
-     rows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
+     rows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,workstream:a.workstream||a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
    });
    amiraBalanceRows=rows;
    initMaterialBalanceControls();
@@ -704,7 +721,7 @@ function monthlyPeriodOptions(){
  for(let n=0;n<120;n++){const k=`${y}-${String(m).padStart(2,'0')}`;out.push(monthlyPeriodBounds(k));m++;if(m===13){m=1;y++;}}
  return out;
 }
-function monthlyIsGram(uom){return /GR|GRAM|G\b/.test(String(uom||'').toUpperCase());}
+function monthlyIsGram(uom){return racunUnitClass(uom)==='GR';}
 function monthlyWorkerKey(r,date){const worker=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE);return worker?[date,worker].join('|'):'';}
 function monthlyWorkstreamForJob(code,j){const c=clean(code),n=String(j?.DESCRIPTION||'').toUpperCase(),cg=String(j?.KODECGP||j?.CGP||j?.KODE_CGP||'').toUpperCase();if(['220601','220602'].includes(c)||/CIRCLE CHEMIST|CIRCLE WEEDING CHEMIST|\bCWC\b/.test(n))return'CWC';if(['220401','220402'].includes(c)||/PATH CHEMIS|PATH CONTROL CHEMIS|\bPATH CHEMIST\b/.test(n))return'PATH';if(c==='220503'||/TPH CHEMIS|\bTPH CHEMIST\b/.test(n))return'TPH';if(c==='220101'||/CIRCLE WEEDING MANUAL|CW MANU(?:AL)?|\bCWM\b/.test(n))return'CWM';if(['230201','230202'].includes(c)||/WEEDING CHEMIS|FOLLOW UP WEEDING CHEMIS/.test(n))return'WDC';if(cg==='PUPUK'||cg.includes('PUPUK')||/PUPUK|FERTIL/.test(n))return'PUPUK';if(['230101','230102','230103','230301'].includes(c)||/WIPPING|WEEDING|BABAT|DONGKEL|NEPROLEPHIS|LALANG|ANAK KAYU/.test(n))return'WDM';if(c==='240101'||/PRUNING/.test(n))return'PRUNING';return'OTHER';}
 function monthlyBlockShareForWorkerDay(sic,date,worker){
@@ -744,11 +761,22 @@ async function monthlyHistoricalRows(bounds){
    const c=clean(r.JOBCODE),mandor=clean(r.MANDORCODE),rk=[c,mandor,normDate(r.TANGGAL||r.DATE)||date].join('|');
    const sicRows=sicKey[rk]||[];const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(b&&v>0)p4[b]=(p4[b]||0)+v});
    const blocks=Object.keys(p4),tot=blocks.reduce((a,b)=>a+p4[b],0);if(!blocks.length||!tot)return;
+   const rowItems=[];
    for(let i=1;i<=6;i++){
     const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]),qty=num(r['QTYMAT'+i]||r['QTY'+i]);if(!mc||!qty)continue;
-    const md=localMats.get(mc)||{},name=md.DESCRIPTION||mc,uom=String(md.UOM||'').toUpperCase(),gram=monthlyIsGram(uom),ws=monthlyWorkstreamForJob(c,localJobs.get(c)||{});
-    blocks.forEach(b=>{const share=p4[b]/tot,q=qty*share,x=ensureBlock(b);const bp=monthlyBasePrice(b,name,uom);const cc=bp?(gram?(q/1000)*bp.price:q*bp.price):0;if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;x.wsCostRacun[ws]=(x.wsCostRacun[ws]||0)+cc;});
+    const md=localMats.get(mc)||{},name=md.DESCRIPTION||mc,uom=String(md.UOM||'').toUpperCase();
+    rowItems.push({mc,qty,name,uom,canonical:racunMaterialNorm(name)});
    }
+   if(!rowItems.length)return;
+   const ws=monthlyWorkstreamForJob(c,localJobs.get(c)||{}),family=ws==='CWC'?'CWC':(ws==='PATH'||ws==='TPH')?'PTC':ws==='WDC'?'WDC':'';
+   blocks.forEach(b=>{
+    const share=p4[b]/tot;
+    const matSet=[...new Set(rowItems.map(it=>it.canonical))];
+    const allowed=family?['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4'].filter(t=>t.startsWith(family)):[];
+    const candidates=allowed.filter(type=>{const bs=new Set((BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===b&&String(x.type||'').toUpperCase()===type).map(x=>racunMaterialNorm(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
+    const internalType=candidates.length===1?candidates[0]:'';
+    rowItems.forEach(it=>{const q=it.qty*share,x=ensureBlock(b),bp=internalType?monthlyBasePrice(b,internalType,it.name,it.uom):null,cc=racunCost(q,it.uom,bp),gram=racunUnitClass(it.uom)==='GR';if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else if(racunUnitClass(it.uom)==='L'){x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;x.wsCostRacun[ws]=(x.wsCostRacun[ws]||0)+cc;});
+   });
   });
   Object.values(blockMap).forEach(x=>out.push({date,...x}));
  }
@@ -842,7 +870,7 @@ async function dailyAllAfdelingData(targetDate){
      (d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE),p=num(r.P4);if(!b||!w||p<=0)return;const k=w+'|'+date;if(!workerDay.has(k))workerDay.set(k,{});workerDay.get(k)[b]=(workerDay.get(k)[b]||0)+p;ensure(b).ha+=p;});
      const umk=Math.max(0,num($('monthlyUmk')?.value)||3909005),days=Math.max(1,amiraCalendarHK(date,date)),hkRate=umk/days;
      workerDay.forEach(shares=>{const tot=Object.values(shares).reduce((a,v)=>a+v,0);if(!tot)return;Object.entries(shares).forEach(([b,p])=>{const x=ensure(b),share=p/tot;x.hk+=share;x.costHK+=share*hkRate;});});
-     (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);if(gram)x.racunGr+=qty;else x.racunL+=qty;const bp=dailyBasePrice(b,a.displayMaterial||a.material,uom);if(bp)x.costRacun+=gram?(qty/1000)*num(bp.price):qty*num(bp.price);});
+     (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);if(gram)x.racunGr+=qty;else x.racunL+=qty;const bp=dailyBasePrice(b,a.type,a.displayMaterial||a.material,uom);if(bp)x.costRacun+=racunCost(qty,uom,bp);});
      blockMap.forEach(x=>{const k=x.afdeling+'|'+x.block;const z=allBlocks.get(k)||{afdeling:x.afdeling,block:x.block,ha:0,hk:0,costHK:0,racunL:0,racunGr:0,costRacun:0};z.ha+=x.ha;z.hk+=x.hk;z.costHK+=x.costHK;z.racunL+=x.racunL;z.racunGr+=x.racunGr;z.costRacun+=x.costRacun;allBlocks.set(k,z);});
    }
  }finally{Object.assign(state,old);}
@@ -1065,7 +1093,7 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
  renderSpecialPage('page-pruning','PRUNING',pruningPageRows,'Racun',dashboardWorkstreamData(d).pruning.racun);
  const normBalanceMat=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return alias[n]||n};
  const rawMaterialRows=[]; (d.mats||[]).forEach(r=>{const date=normDate(r.TANGGAL)||normDate(r.DATE)||d.date||'—'; const directBlock=clean(r.BLOKCODE||r.BLOCKCODE||r.BLOCK); const resolvedBlocks=[...(d.sicByKeyMap?.[[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')]||[])].filter(Boolean); const targetBlocks=directBlock?[directBlock]:resolvedBlocks; const sicRows=(d.sic||[]).filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')&&clean(x.BLOKCODE)); const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(v>0)p4[b]=(p4[b]||0)+v}); const totalP4=targetBlocks.reduce((a,b)=>a+(p4[b]||0),0); for(let i=1;i<=6;i++){const code=clean(r['MAT'+i]||r['MATERIALCODE'+i]); const qty=num(r['QTYMAT'+i]||r['QTY'+i]); if(!code||!qty)continue; const md=mat(code); if(!targetBlocks.length){rawMaterialRows.push({date,block:'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty,uom:md.UOM||'—'});continue;} targetBlocks.forEach(b=>{const share=directBlock?1:(totalP4>0?(p4[b]||0)/totalP4:1/targetBlocks.length);rawMaterialRows.push({date,block:b||'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty:qty*share,uom:md.UOM||'—'});});}});
- $('materialDetail').innerHTML=rawMaterialRows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.job.localeCompare(b.job)||a.code.localeCompare(b.code)).map(v=>`<tr><td>${v.date}</td><td>${v.block}</td><td>${itemName(v.job)}</td><td><b>${v.material}</b></td><td>${v.code}</td><td>${fmt(v.qty)}</td><td>${v.uom}</td><td>${v.job}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">Belum ada racun aktual dari T_MATERIAL.</td></tr>`;
+ $('materialDetail').innerHTML=rawMaterialRows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.job.localeCompare(b.job)||a.code.localeCompare(b.code)).map(v=>`<tr><td>${v.date}</td><td>${v.block}</td><td>${itemName(v.job)}</td><td><b>${v.material}</b></td><td>${v.code}</td><td>${fmt(v.qty)}</td><td>${racunUnitClass(v.uom)==='L'?'L':racunUnitClass(v.uom)==='GR'?'GR':v.uom}</td><td>${v.job}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">Belum ada racun aktual dari T_MATERIAL.</td></tr>`;
  // MATERIAL BALANCE — Engine 05 Actual T_MATERIAL minus Engine 06 Base Prescription.
  const balanceRows=[];
 
@@ -1090,7 +1118,8 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
      const share=(p4ByBlock[block]||0)/totalP4;
      const candidates=allowed.filter(type=>{const bs=new Set((d.prescriptionByBlock?.[[block,type].join('|')]?.items||[]).map(x=>normBalanceMat(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
      const subtype=candidates.length===1?subtypeOfType(candidates[0]):''; const reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC';
-     items.forEach(it=>{const qty=it.qty*share,k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,subtype,material:it.material,canonical:it.canonical,qty,uom:it.uom,jobs:new Set([jobCode]),date});});
+     const reportWorkstream=(jf==='CWC')?'CWC':(jobCode==='220401'||jobCode==='220402')?'PATH':(jobCode==='220503')?'TPH':(jf==='WDC'?'WDC':reportFamily);
+     items.forEach(it=>{const qty=it.qty*share,k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,workstream:reportWorkstream,subtype,material:it.material,canonical:it.canonical,qty,uom:it.uom,jobs:new Set([jobCode]),date});});
    });
  });
 
@@ -1099,7 +1128,7 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
  Object.values(d.prescriptionByBlock||{}).forEach(p=>{const internal=String(p.type||'').toUpperCase(),fam=familyOfType(internal);if(!fam)return;const reportFamily=(fam==='CWC'||fam==='PTC')?'CPT':'WDC',subtype=subtypeOfType(internal);p.items.forEach(x=>{const canonical=normBalanceMat(x.material),k=[p.block,reportFamily,subtype,canonical].join('|'),prev=baseGroups.get(k);if(prev){prev.total+=num(x.total);prev.dose+=num(x.dose);prev.cost+=num(x.cost);}else baseGroups.set(k,{block:p.block,type:reportFamily,subtype,material:x.material,total:num(x.total),dose:num(x.dose),cost:num(x.cost),ha:num(p.ha),uom:x.uom||'',price:num(x.price)});});});
 
  // ENGINE 07: ALWAYS show every actual material usage. Actual - Base when base exists.
- actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
+ actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,workstream:a.workstream||a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
  $('balanceDetail').innerHTML=balanceRows.sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).map(r=>{const dose=r.ha?r.actual/r.ha:0,over=r.baseExists&&r.diff>0.000001,status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';return`<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`}).join('')||`<tr><td colspan="9" class="empty">Belum ada penggunaan material aktual dari T_MATERIAL.</td></tr>`;
  $('planDetail').innerHTML=`<table><thead><tr><th>WS</th><th>Plan Ha</th><th>Real Ha</th><th>Achievement</th></tr></thead><tbody>${WS.map(w=>`<tr><td>${w}</td><td>${fmt(d.planWS[w])}</td><td>${fmt(d.actualWS[w])}</td><td>${d.planWS[w]?fmt(pct(d.actualWS[w],d.planWS[w]))+'%':'—'}</td></tr>`).join('')}</tbody></table>`;
  const ihr=itemHKRows();$('itemHKDetail').innerHTML=ihr.map(x=>{const ha=x.hk?((workerItemHa.get([x.date,x.block,x.code].join('|'))||0)):0;return`<tr><td>${x.date||'—'}</td><td>${x.block}</td><td>${x.ws}</td><td><b>${itemName(x.code)}</b></td><td>${x.code}</td><td>${fmt(x.hk)}</td><td>${fmt(ha)}</td><td>${x.hk?fmt(ha/x.hk):'—'}</td></tr>`}).join('')||`<tr><td colspan="8" class="empty">Belum ada item activity.</td></tr>`;
