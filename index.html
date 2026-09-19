@@ -85,6 +85,37 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <footer class="footer">AMIRA v46.1 · Engine 05 Actual → Engine 06 Base → Engine 07 Balance · 5 Afdeling · CWM Fix · Fertilizer Item · Static GitHub Pages application</footer>
 </div></main></div>
 <input id="masterInput" type="file" accept=".csv,text/csv" hidden><input id="rawatInput" type="file" accept=".csv,text/csv" multiple hidden>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+window.AMIRA_FIREBASE_READY = (async function(){
+  try {
+    const firebaseConfig = {
+      apiKey: "AIzaSyCyl6FLtAPbZxS0wIdK7aPvcGOXUhvXp30",
+      authDomain: "amira-field.firebaseapp.com",
+      projectId: "amira-field",
+      storageBucket: "amira-field.firebasestorage.app",
+      messagingSenderId: "936239069703",
+      appId: "1:936239069703:web:223239a3b89eabf914c8a2",
+      measurementId: "G-XDT9550YRE"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    if (!auth.currentUser) await auth.signInAnonymously();
+    window.AMIRA_FIREBASE = {db, auth, app: firebase.app()};
+    window.AMIRA_CLOUD_LAST_STATUS = 'CONNECTED';
+    return window.AMIRA_FIREBASE;
+  } catch (e) {
+    console.warn('AMIRA Firebase unavailable:', e);
+    window.AMIRA_FIREBASE = null;
+    window.AMIRA_FIREBASE_ERROR = e;
+    window.AMIRA_CLOUD_LAST_STATUS = 'OFFLINE';
+    return null;
+  }
+})();
+</script>
 <script>
 (()=>{
 const $=id=>document.getElementById(id), fmt=n=>Number(n||0).toLocaleString('id-ID',{maximumFractionDigits:2}), num=v=>{const x=parseFloat(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:0}, clean=v=>String(v??'').trim(), pct=(a,b)=>b?Math.round(a/b*100):0;
@@ -240,10 +271,67 @@ async function rawText(v){if(v instanceof Blob)return await v.text();return Stri
 async function snapshot(){const afdeling=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');const master=state.masterRaw?new Blob([state.masterRaw],{type:'text/plain'}):'';const files=[];for(const f of state.files)files.push({name:f.name,raw:new Blob([String(f.raw||'')],{type:'text/csv'})});return {date:state.dataset.date,afdeling,id:state.dataset.id,status:'LOCKED',lockedAt:new Date().toISOString(),masterRaw:master,files}}
 function db(){return new Promise((res,rej)=>{let r=indexedDB.open(DB,4);r.onupgradeneeded=e=>{const dbi=r.result;if(!dbi.objectStoreNames.contains(STORE))dbi.createObjectStore(STORE,{keyPath:'date'});if(!dbi.objectStoreNames.contains(HSTORE))dbi.createObjectStore(HSTORE,{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('Database AMIRA sedang dipakai tab lain. Tutup tab AMIRA lain lalu coba lagi.'))})}
 async function clearHistory(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readwrite');tx.objectStore(HSTORE).clear();tx.objectStore(STORE).clear();tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function saveSnapshotByDate(s){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE],'readwrite');const hs=tx.objectStore(HSTORE);const targetDate=String(s.date||''),targetAf=snapAfdeling(s);const q=hs.getAll();q.onsuccess=()=>{try{for(const x of (q.result||[])){if(String(x.date||'')===targetDate&&snapAfdeling(x)===targetAf&&x.id!==s.id)hs.delete(x.id)}hs.put({...s,id:s.id||`AMIRA-${targetDate}-${targetAf}`});}catch(e){try{tx.abort()}catch(_e){}rej(e)}};q.onerror=()=>{try{tx.abort()}catch(_e){}rej(q.error||new Error('Gagal membaca historical'))};tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error||new Error('Gagal menyimpan historical'))};tx.onabort=()=>{d.close();}})}
-async function allSnaps(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).getAll(),q2=tx.objectStore(STORE).getAll();let a=[],b=[];q1.onsuccess=()=>{a=q1.result||[]};q2.onsuccess=()=>{b=q2.result||[]};tx.oncomplete=()=>{const byKey=new Map();for(const x of [...a,...b]){const y={...x,id:x.id||('LEGACY-'+String(x.date||'UNKNOWN')),afdeling:snapAfdeling(x)};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>0)byKey.set(k,y)}const arr=[...byKey.values()].sort((x,y)=>String(y.date).localeCompare(String(x.date))||String(y.afdeling).localeCompare(String(x.afdeling))||String(y.lockedAt).localeCompare(String(x.lockedAt)));d.close();res(arr)};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function getSnap(id){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).get(id);const q2=tx.objectStore(STORE).get(String(id).replace(/^LEGACY-/,''));let a,b;q1.onsuccess=()=>a=q1.result;q2.onsuccess=()=>b=q2.result;tx.oncomplete=()=>{d.close();res(a||b)};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function loadSnap(s){resetFiles();state.masterRaw=await rawText(s.masterRaw||'');if(state.masterRaw){state.master=parseMaster(state.masterRaw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]))}for(const f of s.files||[]){const raw=await rawText(f.raw);mergeFile(parseAmanda(raw),f.name,raw)}state.dataset={status:'LOCKED',date:s.date,locked:true,id:s.id,afdeling:afdelingLabel(s.afdeling||inferAfdelingFromSections(state.sections)||'')};state.ui.afdeling=state.dataset.afdeling||state.ui.afdeling||'OCYM';renderAll()}
+const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=450000;
+async function amiraCloud(){try{return await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));}catch(e){return null}}
+function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;i<s.length;i+=AMIRA_CLOUD_CHUNK)out.push(s.slice(i,i+AMIRA_CLOUD_CHUNK));return out.length?out:['']}
+async function cloudSaveSnapshot(s){
+  const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
+  const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`), ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
+  const master=await rawText(s.masterRaw||'');
+  const files=[]; for(const f of (s.files||[])) files.push({name:f.name,raw:await rawText(f.raw||'')});
+  await ref.set({id,date:String(s.date||''),afdeling:snapAfdeling(s),status:String(s.status||'LOCKED'),lockedAt:s.lockedAt||new Date().toISOString(),fileCount:files.length,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+  const old=await ref.collection('chunks').get();
+  if(!old.empty){for(let i=0;i<old.docs.length;i+=400){const batch=fb.db.batch();for(const d of old.docs.slice(i,i+400))batch.delete(d.ref);await batch.commit();}}
+  const writes=[];
+  for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
+    const chunks=amiraChunkText(text);
+    chunks.forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
+  }
+  for(let i=0;i<writes.length;i+=400){
+    const batch=fb.db.batch();
+    for(const w of writes.slice(i,i+400)) batch.set(ref.collection('chunks').doc(`${w.kind}_${w.index}`),{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
+    await batch.commit();
+  }
+  window.AMIRA_CLOUD_LAST_STATUS='SYNCED';
+  return {id};
+}
+async function cloudListSnapshots(){
+  const fb=await amiraCloud(); if(!fb) return [];
+  const q=await fb.db.collection(AMIRA_CLOUD_COLLECTION).get();
+  return q.docs.map(d=>d.data()).map(x=>({...x,afdeling:snapAfdeling(x),source:'cloud'}));
+}
+async function cloudGetSnapshot(id){
+  const fb=await amiraCloud(); if(!fb) return null;
+  const ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(String(id)), meta=await ref.get();
+  if(!meta.exists)return null;
+  const q=await ref.collection('chunks').get();
+  const rows=q.docs.map(d=>d.data()).sort((a,b)=>String(a.kind).localeCompare(String(b.kind))||Number(a.index)-Number(b.index));
+  const groups={};
+  rows.forEach(r=>{(groups[r.kind]??=[]).push(r)});
+  const join=k=>(groups[k]||[]).sort((a,b)=>Number(a.index)-Number(b.index)).map(x=>String(x.text||'')).join('');
+  const files=Object.keys(groups).filter(k=>k.startsWith('file')).sort((a,b)=>Number(a.slice(4))-Number(b.slice(4))).map(k=>({name:groups[k][0]?.name||`file${k.slice(4)}.csv`,raw:join(k)}));
+  return {...meta.data(),masterRaw:join('master'),files,source:'cloud'};
+}
+async function saveSnapshotByDate(s){
+  let d=await db();
+  await new Promise((res,rej)=>{const tx=d.transaction([HSTORE],'readwrite');const hs=tx.objectStore(HSTORE);const targetDate=String(s.date||''),targetAf=snapAfdeling(s);const q=hs.getAll();q.onsuccess=()=>{try{for(const x of (q.result||[])){if(String(x.date||'')===targetDate&&snapAfdeling(x)===targetAf&&x.id!==s.id)hs.delete(x.id)}hs.put({...s,id:s.id||`AMIRA-${targetDate}-${targetAf}`});}catch(e){try{tx.abort()}catch(_e){}rej(e)}};q.onerror=()=>{try{tx.abort()}catch(_e){}rej(q.error||new Error('Gagal membaca historical'))};tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error||new Error('Gagal menyimpan historical'))};});
+  try{await cloudSaveSnapshot(s);}catch(e){window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';console.warn('AMIRA cloud sync gagal:',e);}
+}
+async function allSnaps(){
+  let d=await db();
+  const local=await new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).getAll(),q2=tx.objectStore(STORE).getAll();let a=[],b=[];q1.onsuccess=()=>{a=q1.result||[]};q2.onsuccess=()=>{b=q2.result||[]};tx.oncomplete=()=>{d.close();res([...a,...b])};tx.onerror=()=>{d.close();rej(tx.error)}}).catch(()=>[]);
+  const byKey=new Map();
+  for(const x of local){const y={...x,id:x.id||('LEGACY-'+String(x.date||'UNKNOWN')),afdeling:snapAfdeling(x),source:'local'};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>0)byKey.set(k,y)}
+  try{for(const x of await cloudListSnapshots()){const y={...x,id:x.id||`AMIRA-${x.date}-${x.afdeling}`,source:'cloud'};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>=0)byKey.set(k,y)}}catch(e){console.warn('AMIRA cloud history unavailable:',e)}
+  return [...byKey.values()].sort((x,y)=>String(y.date).localeCompare(String(x.date))||String(y.afdeling).localeCompare(String(x.afdeling))||String(y.lockedAt).localeCompare(String(x.lockedAt)));
+}
+async function getSnap(id){
+  try{const cloud=await cloudGetSnapshot(id);if(cloud)return cloud}catch(e){console.warn('AMIRA cloud load unavailable:',e)}
+  let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).get(id);const q2=tx.objectStore(STORE).get(String(id).replace(/^LEGACY-/,''));let a,b;q1.onsuccess=()=>a=q1.result;q2.onsuccess=()=>b=q2.result;tx.oncomplete=()=>{d.close();res(a||b)};tx.onerror=()=>{d.close();rej(tx.error)}})
+}
+async function loadSnap(s){
+  if(s?.source==='cloud' && (!s.files?.length || typeof s.masterRaw==='undefined')){const full=await cloudGetSnapshot(s.id);if(full)s=full}
+  resetFiles();state.masterRaw=await rawText(s.masterRaw||'');if(state.masterRaw){state.master=parseMaster(state.masterRaw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]))}for(const f of s.files||[]){const raw=await rawText(f.raw);mergeFile(parseAmanda(raw),f.name,raw)}state.dataset={status:'LOCKED',date:s.date,locked:true,id:s.id,afdeling:afdelingLabel(s.afdeling||inferAfdelingFromSections(state.sections)||'')};state.ui.afdeling=state.dataset.afdeling||state.ui.afdeling||'OCYM';renderAll()}
 function readFileText(file){return new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result||''));fr.onerror=()=>reject(fr.error||new Error('Gagal membaca file '+file.name));fr.readAsText(file,'UTF-8')})}
 function hydrateMaster(raw){state.masterRaw=raw;state.master=parseMaster(raw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]));}
 async function uploadMaster(file){const raw=await readFileText(file);const parsed=parseMaster(raw);if(!Object.keys(parsed.sections).length)throw new Error('Master Rawat tidak terbaca.');hydrateMaster(raw);renderAll();}

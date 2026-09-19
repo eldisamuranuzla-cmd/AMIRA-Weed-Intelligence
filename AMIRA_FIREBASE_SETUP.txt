@@ -1,0 +1,38 @@
+AMIRA V46.2 — FIREBASE CLOUD SETUP
+====================================
+
+Project:
+- Firebase project: amira-field
+- Firestore: already created in Standard / Production mode
+- AMIRA now keeps local IndexedDB as fallback and additionally syncs LOCKED historical datasets to Firestore.
+
+IMPORTANT — ONE-TIME FIREBASE SETUP
+1. Firebase Console → Authentication → Sign-in method.
+2. Enable "Anonymous".
+3. Firestore Database → Rules. Replace the rules with:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /amira_datasets/{datasetId} {
+      allow read, write: if request.auth != null;
+      match /chunks/{chunkId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+  }
+}
+
+This is suitable for the initial internal test because every authenticated AMIRA session can access the shared AMIRA dataset. Before wider deployment, add proper user/afdeling authorization rules.
+
+WHAT WAS CHANGED
+- Added Firebase Web SDK.
+- Anonymous authentication is used for the initial cloud connection.
+- LOCKED AMIRA historical datasets are mirrored to Firestore.
+- Large raw CSV/master text is chunked into Firestore documents to avoid the 1 MiB Firestore document limit.
+- Historical list merges local IndexedDB and cloud history.
+- Opening a cloud historical dataset reconstructs the original master/file content.
+- Existing local IndexedDB remains as fallback; existing AMIRA calculations/UI are not intentionally rewritten.
+
+NOTE
+The supplied AMIRA HTML contains an optional Weed Vision photo-analysis module. The core historical dataset engine does not require photos.
