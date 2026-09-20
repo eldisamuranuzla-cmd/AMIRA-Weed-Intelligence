@@ -279,43 +279,75 @@ function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;
 function amiraTimeout(promise,ms=20000){
   return Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error('Timeout 20 detik saat menghubungi Firestore.')),ms))]);
 }
+async function amiraRestFetch(path, options={}, timeoutMs=20000){
+  const fb=await amiraCloud();
+  if(!fb || !fb.auth?.currentUser) throw new Error('Firebase Anonymous Auth belum siap.');
+  const token=await fb.auth.currentUser.getIdToken(true);
+  const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  try{
+    const headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},options.headers||{});
+    const res=await fetch('https://firestore.googleapis.com/v1/'+path,{...options,headers,signal:ctrl.signal});
+    const txt=await res.text();
+    let body=null; try{body=txt?JSON.parse(txt):null}catch(_e){body=txt}
+    if(!res.ok){const msg=body?.error?.message||`HTTP ${res.status} ${res.statusText}`;const err=new Error(msg);err.code=body?.error?.status||`HTTP_${res.status}`;throw err;}
+    return body;
+  }catch(e){
+    if(e?.name==='AbortError') throw new Error(`Timeout ${timeoutMs/1000} detik saat menghubungi Firestore REST.`);
+    throw e;
+  }finally{clearTimeout(timer)}
+}
+function fsVal(v){
+  if(v===null||typeof v==='undefined') return {nullValue:null};
+  if(typeof v==='boolean') return {booleanValue:v};
+  if(typeof v==='number' && Number.isFinite(v)) return Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v};
+  return {stringValue:String(v)};
+}
+function fsFields(obj){const out={};for(const [k,v] of Object.entries(obj||{}))out[k]=fsVal(v);return out;}
+const AMIRA_FS_BASE='projects/amira-field-intelligence/databases/(default)';
+function fsDocPath(collection,id){return `${AMIRA_FS_BASE}/documents/${collection}/${encodeURIComponent(String(id))}`}
+function fsChunkPath(datasetId,chunkId){return `${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}/${encodeURIComponent(String(datasetId))}/chunks/${encodeURIComponent(String(chunkId))}`}
 async function cloudSaveSnapshot(s){
   const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
-  const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`), ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
+  const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`);
   const master=await rawText(s.masterRaw||'');
   const files=[]; for(const f of (s.files||[])) files.push({name:f.name,raw:await rawText(f.raw||'')});
-  await ref.set({id,date:String(s.date||''),afdeling:snapAfdeling(s),status:String(s.status||'LOCKED'),lockedAt:s.lockedAt||new Date().toISOString(),fileCount:files.length,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
-  const old=await ref.collection('chunks').get();
-  if(!old.empty){for(let i=0;i<old.docs.length;i+=400){const batch=fb.db.batch();for(const d of old.docs.slice(i,i+400))batch.delete(d.ref);await batch.commit();}}
+  // Use Firestore REST with the authenticated Anonymous ID token. This avoids the
+  // browser WebChannel that is timing out on the mobile network.
+  await amiraRestFetch(`${fsDocPath(AMIRA_CLOUD_COLLECTION,id)}?updateMask.fieldPaths=id&updateMask.fieldPaths=date&updateMask.fieldPaths=afdeling&updateMask.fieldPaths=status&updateMask.fieldPaths=lockedAt&updateMask.fieldPaths=fileCount&updateMask.fieldPaths=updatedAt`,{
+    method:'PATCH',body:JSON.stringify({fields:fsFields({id,date:String(s.date||''),afdeling:snapAfdeling(s),status:String(s.status||'LOCKED'),lockedAt:s.lockedAt||new Date().toISOString(),fileCount:files.length,updatedAt:new Date().toISOString()})})
+  });
   const writes=[];
   for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
-    const chunks=amiraChunkText(text);
-    chunks.forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
+    amiraChunkText(text).forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
   }
   for(let i=0;i<writes.length;i+=400){
-    const batch=fb.db.batch();
-    for(const w of writes.slice(i,i+400)) batch.set(ref.collection('chunks').doc(`${w.kind}_${w.index}`),{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
-    await batch.commit();
+    const batch=writes.slice(i,i+400).map(w=>({update:{name:fsChunkPath(id,`${w.kind}_${w.index}`),fields:fsFields({kind:w.kind,index:w.index,name:w.name,text:w.chunk})}}));
+    await amiraRestFetch(`${AMIRA_FS_BASE}/documents:commit`,{method:'POST',body:JSON.stringify({writes:batch})});
   }
   window.AMIRA_CLOUD_LAST_STATUS='SYNCED';
   return {id};
 }
 async function cloudListSnapshots(){
   const fb=await amiraCloud(); if(!fb) return [];
-  const q=await fb.db.collection(AMIRA_CLOUD_COLLECTION).get();
-  return q.docs.map(d=>d.data()).map(x=>({...x,afdeling:snapAfdeling(x),source:'cloud'}));
+  const data=await amiraRestFetch(`${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}?pageSize=100`);
+  return (data?.documents||[]).map(d=>{
+    const f=d.fields||{}, x={};
+    for(const [k,v] of Object.entries(f)){x[k]=v.stringValue??v.integerValue??v.doubleValue??v.booleanValue??v.timestampValue??null}
+    x.afdeling=snapAfdeling(x);x.source='cloud';return x;
+  });
 }
 async function cloudGetSnapshot(id){
   const fb=await amiraCloud(); if(!fb) return null;
-  const ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(String(id)), meta=await ref.get();
-  if(!meta.exists)return null;
-  const q=await ref.collection('chunks').get();
-  const rows=q.docs.map(d=>d.data()).sort((a,b)=>String(a.kind).localeCompare(String(b.kind))||Number(a.index)-Number(b.index));
-  const groups={};
-  rows.forEach(r=>{(groups[r.kind]??=[]).push(r)});
-  const join=k=>(groups[k]||[]).sort((a,b)=>Number(a.index)-Number(b.index)).map(x=>String(x.text||'')).join('');
+  const meta=await amiraRestFetch(fsDocPath(AMIRA_CLOUD_COLLECTION,String(id)));
+  if(!meta)return null;
+  const cv=v=>v?.stringValue??v?.integerValue??v?.doubleValue??v?.booleanValue??v?.timestampValue??null;
+  const metaData={};for(const [k,v] of Object.entries(meta.fields||{}))metaData[k]=cv(v);
+  const rows=await amiraRestFetch(`${fsDocPath(AMIRA_CLOUD_COLLECTION,String(id))}/chunks?pageSize=100`);
+  const docs=rows?.documents||[]; const groups={};
+  for(const d of docs){const f=d.fields||{}, r={kind:cv(f.kind),index:Number(cv(f.index)||0),name:cv(f.name),text:cv(f.text)||''};(groups[r.kind]??=[]).push(r)}
+  const join=k=>(groups[k]||[]).sort((a,b)=>a.index-b.index).map(x=>String(x.text||'')).join('');
   const files=Object.keys(groups).filter(k=>k.startsWith('file')).sort((a,b)=>Number(a.slice(4))-Number(b.slice(4))).map(k=>({name:groups[k][0]?.name||`file${k.slice(4)}.csv`,raw:join(k)}));
-  return {...meta.data(),masterRaw:join('master'),files,source:'cloud'};
+  return {...metaData,masterRaw:join('master'),files,source:'cloud'};
 }
 async function saveSnapshotByDate(s){
   // Firebase menjadi gate sebelum dataset dianggap berhasil tersimpan/LOCKED.
