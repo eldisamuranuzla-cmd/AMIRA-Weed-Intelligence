@@ -61,7 +61,7 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <section id="page-history" class="page"><div class="eyebrow">CONTROL</div><div class="title">Dataset & History</div><div class="meta">Satu tanggal + afdeling = satu dataset. Tanggal yang sama pada OC/OA/OB/OD/OE disimpan terpisah berdasarkan code afdeling; upload afdeling lain tidak menimpa historical afdeling sebelumnya.</div><div class="card" style="margin-top:14px"><div class="head"><h3>Historical Dataset</h3><span>LOCKED snapshots</span></div><div id="historyList"><div class="empty">Belum ada historical dataset.</div></div></div></section>
 <section id="page-execution" class="page"><div class="eyebrow">ENGINE 01</div><div class="title">Rawat Execution</div><div class="meta">Seluruh transaksi aktual yang lolos reconciliation dari dataset aktif.</div><div class="card" style="margin-top:14px"><div class="head"><h3>Data Harian</h3><button class="btn" id="dailyDownloadBtn" type="button">Download Data Harian</button></div><div class="notice">Download mengikuti dataset aktif: tanggal + afdeling. Tombol Daily All Afd di Monthly mengambil semua Historical LOCKED pada tanggal yang sama + dataset aktif bila belum LOCKED. Rekap memuat Ha pekerjaan, HK unik worker × tanggal, Cost HK, pemakaian racun, Cost Racun, Cost/Ha, serta detail transaksi.</div><div class="scroll"><table><thead><tr><th>Waktu</th><th>Worker</th><th>Job</th><th>WS</th><th>Blok</th><th>GPS</th><th>Foto</th></tr></thead><tbody id="executionTable"></tbody></table></div></div></section>
 <section id="page-cpt" class="page"></section><section id="page-cwm" class="page"></section><section id="page-wdc" class="page"></section><section id="page-wdm" class="page"></section><section id="page-pupuk" class="page"></section><section id="page-pruning" class="page"></section><section id="page-other" class="page"></section>
-<section id="page-material" class="page"><div class="eyebrow">ENGINE 05 · MAIN ACTUAL</div><div class="title">Material Usage</div><div style="margin:10px 0"><button class="btn" type="button" onclick="amiraPdfMaterialUsage()">📄 Download PDF</button></div><div class="meta">MAIN actual racun yang benar-benar dilaporkan di T_MATERIAL. Engine 06 hanya menjadi Base Prescription; Engine 07 menghitung Actual − Base.</div><div class="card" style="margin-top:14px"><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Blok</th><th>Jenis</th><th>Nama Material</th><th>Kode</th><th>Qty</th><th>UOM</th><th>Job</th></tr></thead><tbody id="materialDetail"></tbody></table></div></div></section>
+<section id="page-material" class="page"><div class="eyebrow">ENGINE 05 · MAIN ACTUAL</div><div class="title">Material Usage</div><div style="margin:10px 0"><button class="btn" type="button" onclick="amiraPdfMaterialUsage()">📄 Download PDF</button></div><div class="meta">MAIN actual racun yang benar-benar dilaporkan di T_MATERIAL. Engine 06 hanya menjadi Base Prescription; Engine 07 menghitung Actual − Base.</div><div class="card" style="margin-top:14px"><div class="scroll"><table><thead><tr><th>Tanggal</th><th>Blok</th><th>Jenis</th><th>Nama Material</th><th>Kode</th><th>Qty</th><th>UOM</th><th>Harga</th><th>Cost Racun</th><th>Job</th></tr></thead><tbody id="materialDetail"></tbody></table></div></div></section>
 <section id="page-racun" class="page"><div class="eyebrow">ENGINE 06 · MATERIAL CONTROL</div><div class="title">Base Racun & Material Settings</div><div class="meta">BASE Prescription ALL AFDELING embedded dari Excel "dosis per blok dan cost blok.xlsx" · Input Per Blok + Cost Per Blok · 832 baris · 32 blok.</div>
 <div class="detailKpis"><div class="detailKpi"><small>Blok OC/YM</small><b id="rxBlocks">0</b></div><div class="detailKpi"><small>Prescription</small><b id="rxRows">0</b></div><div class="detailKpi"><small>Material</small><b id="rxMaterials">0</b></div><div class="detailKpi"><small>Type CPT/WDC</small><b id="rxTypes">0</b></div></div>
 <div class="card"><div class="head"><h3>Setting Base Racun</h3><span>Source: Excel embedded · Input Per Blok + Cost Per Blok</span></div><div class="notice"><b>Logika:</b> Blok → Ha → Jenis Semprot (CPT/WDC) → Racun → Dosis/Ha → Base Requirement. Untuk CPT, base racun ditampilkan sebagai <b>gabungan CWC + Path Chemist + TPH Chemist</b> dari pasangan prescription yang sama; subtype internal tetap dipakai untuk matching actual.</div>
@@ -85,6 +85,36 @@ main{margin-left:220px;width:calc(100% - 220px);padding-bottom:25px}.topbar{heig
 <footer class="footer">AMIRA v46.1 · Engine 05 Actual → Engine 06 Base → Engine 07 Balance · 5 Afdeling · CWM Fix · Fertilizer Item · Static GitHub Pages application</footer>
 </div></main></div>
 <input id="masterInput" type="file" accept=".csv,text/csv" hidden><input id="rawatInput" type="file" accept=".csv,text/csv" multiple hidden>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+window.AMIRA_FIREBASE_READY = (async function(){
+  try {
+    const firebaseConfig = {
+      apiKey: "AIzaSyDGvAVIVOF3nIRKYk2qHSLrnwrFpOHVFCk",
+      authDomain: "amira-field-intelligence.firebaseapp.com",
+      projectId: "amira-field-intelligence",
+      storageBucket: "amira-field-intelligence.firebasestorage.app",
+      messagingSenderId: "863408824429",
+      appId: "1:863408824429:web:cef1d6dba78bafb8b8df64"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    if (!auth.currentUser) await auth.signInAnonymously();
+    window.AMIRA_FIREBASE = {db, auth, app: firebase.app()};
+    window.AMIRA_CLOUD_LAST_STATUS = 'CONNECTED';
+    return window.AMIRA_FIREBASE;
+  } catch (e) {
+    console.warn('AMIRA Firebase unavailable:', e);
+    window.AMIRA_FIREBASE = null;
+    window.AMIRA_FIREBASE_ERROR = e;
+    window.AMIRA_CLOUD_LAST_STATUS = 'OFFLINE';
+    return null;
+  }
+})();
+</script>
 <script>
 (()=>{
 const $=id=>document.getElementById(id), fmt=n=>Number(n||0).toLocaleString('id-ID',{maximumFractionDigits:2}), num=v=>{const x=parseFloat(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:0}, clean=v=>String(v??'').trim(), pct=(a,b)=>b?Math.round(a/b*100):0;
@@ -240,10 +270,67 @@ async function rawText(v){if(v instanceof Blob)return await v.text();return Stri
 async function snapshot(){const afdeling=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');const master=state.masterRaw?new Blob([state.masterRaw],{type:'text/plain'}):'';const files=[];for(const f of state.files)files.push({name:f.name,raw:new Blob([String(f.raw||'')],{type:'text/csv'})});return {date:state.dataset.date,afdeling,id:state.dataset.id,status:'LOCKED',lockedAt:new Date().toISOString(),masterRaw:master,files}}
 function db(){return new Promise((res,rej)=>{let r=indexedDB.open(DB,4);r.onupgradeneeded=e=>{const dbi=r.result;if(!dbi.objectStoreNames.contains(STORE))dbi.createObjectStore(STORE,{keyPath:'date'});if(!dbi.objectStoreNames.contains(HSTORE))dbi.createObjectStore(HSTORE,{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('Database AMIRA sedang dipakai tab lain. Tutup tab AMIRA lain lalu coba lagi.'))})}
 async function clearHistory(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readwrite');tx.objectStore(HSTORE).clear();tx.objectStore(STORE).clear();tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function saveSnapshotByDate(s){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE],'readwrite');const hs=tx.objectStore(HSTORE);const targetDate=String(s.date||''),targetAf=snapAfdeling(s);const q=hs.getAll();q.onsuccess=()=>{try{for(const x of (q.result||[])){if(String(x.date||'')===targetDate&&snapAfdeling(x)===targetAf&&x.id!==s.id)hs.delete(x.id)}hs.put({...s,id:s.id||`AMIRA-${targetDate}-${targetAf}`});}catch(e){try{tx.abort()}catch(_e){}rej(e)}};q.onerror=()=>{try{tx.abort()}catch(_e){}rej(q.error||new Error('Gagal membaca historical'))};tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error||new Error('Gagal menyimpan historical'))};tx.onabort=()=>{d.close();}})}
-async function allSnaps(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).getAll(),q2=tx.objectStore(STORE).getAll();let a=[],b=[];q1.onsuccess=()=>{a=q1.result||[]};q2.onsuccess=()=>{b=q2.result||[]};tx.oncomplete=()=>{const byKey=new Map();for(const x of [...a,...b]){const y={...x,id:x.id||('LEGACY-'+String(x.date||'UNKNOWN')),afdeling:snapAfdeling(x)};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>0)byKey.set(k,y)}const arr=[...byKey.values()].sort((x,y)=>String(y.date).localeCompare(String(x.date))||String(y.afdeling).localeCompare(String(x.afdeling))||String(y.lockedAt).localeCompare(String(x.lockedAt)));d.close();res(arr)};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function getSnap(id){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).get(id);const q2=tx.objectStore(STORE).get(String(id).replace(/^LEGACY-/,''));let a,b;q1.onsuccess=()=>a=q1.result;q2.onsuccess=()=>b=q2.result;tx.oncomplete=()=>{d.close();res(a||b)};tx.onerror=()=>{d.close();rej(tx.error)}})}
-async function loadSnap(s){resetFiles();state.masterRaw=await rawText(s.masterRaw||'');if(state.masterRaw){state.master=parseMaster(state.masterRaw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]))}for(const f of s.files||[]){const raw=await rawText(f.raw);mergeFile(parseAmanda(raw),f.name,raw)}state.dataset={status:'LOCKED',date:s.date,locked:true,id:s.id,afdeling:afdelingLabel(s.afdeling||inferAfdelingFromSections(state.sections)||'')};state.ui.afdeling=state.dataset.afdeling||state.ui.afdeling||'OCYM';renderAll()}
+const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=450000;
+async function amiraCloud(){try{return await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));}catch(e){return null}}
+function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;i<s.length;i+=AMIRA_CLOUD_CHUNK)out.push(s.slice(i,i+AMIRA_CLOUD_CHUNK));return out.length?out:['']}
+async function cloudSaveSnapshot(s){
+  const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
+  const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`), ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
+  const master=await rawText(s.masterRaw||'');
+  const files=[]; for(const f of (s.files||[])) files.push({name:f.name,raw:await rawText(f.raw||'')});
+  await ref.set({id,date:String(s.date||''),afdeling:snapAfdeling(s),status:String(s.status||'LOCKED'),lockedAt:s.lockedAt||new Date().toISOString(),fileCount:files.length,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+  const old=await ref.collection('chunks').get();
+  if(!old.empty){for(let i=0;i<old.docs.length;i+=400){const batch=fb.db.batch();for(const d of old.docs.slice(i,i+400))batch.delete(d.ref);await batch.commit();}}
+  const writes=[];
+  for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
+    const chunks=amiraChunkText(text);
+    chunks.forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
+  }
+  for(let i=0;i<writes.length;i+=400){
+    const batch=fb.db.batch();
+    for(const w of writes.slice(i,i+400)) batch.set(ref.collection('chunks').doc(`${w.kind}_${w.index}`),{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
+    await batch.commit();
+  }
+  window.AMIRA_CLOUD_LAST_STATUS='SYNCED';
+  return {id};
+}
+async function cloudListSnapshots(){
+  const fb=await amiraCloud(); if(!fb) return [];
+  const q=await fb.db.collection(AMIRA_CLOUD_COLLECTION).get();
+  return q.docs.map(d=>d.data()).map(x=>({...x,afdeling:snapAfdeling(x),source:'cloud'}));
+}
+async function cloudGetSnapshot(id){
+  const fb=await amiraCloud(); if(!fb) return null;
+  const ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(String(id)), meta=await ref.get();
+  if(!meta.exists)return null;
+  const q=await ref.collection('chunks').get();
+  const rows=q.docs.map(d=>d.data()).sort((a,b)=>String(a.kind).localeCompare(String(b.kind))||Number(a.index)-Number(b.index));
+  const groups={};
+  rows.forEach(r=>{(groups[r.kind]??=[]).push(r)});
+  const join=k=>(groups[k]||[]).sort((a,b)=>Number(a.index)-Number(b.index)).map(x=>String(x.text||'')).join('');
+  const files=Object.keys(groups).filter(k=>k.startsWith('file')).sort((a,b)=>Number(a.slice(4))-Number(b.slice(4))).map(k=>({name:groups[k][0]?.name||`file${k.slice(4)}.csv`,raw:join(k)}));
+  return {...meta.data(),masterRaw:join('master'),files,source:'cloud'};
+}
+async function saveSnapshotByDate(s){
+  let d=await db();
+  await new Promise((res,rej)=>{const tx=d.transaction([HSTORE],'readwrite');const hs=tx.objectStore(HSTORE);const targetDate=String(s.date||''),targetAf=snapAfdeling(s);const q=hs.getAll();q.onsuccess=()=>{try{for(const x of (q.result||[])){if(String(x.date||'')===targetDate&&snapAfdeling(x)===targetAf&&x.id!==s.id)hs.delete(x.id)}hs.put({...s,id:s.id||`AMIRA-${targetDate}-${targetAf}`});}catch(e){try{tx.abort()}catch(_e){}rej(e)}};q.onerror=()=>{try{tx.abort()}catch(_e){}rej(q.error||new Error('Gagal membaca historical'))};tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error||new Error('Gagal menyimpan historical'))};});
+  try{await cloudSaveSnapshot(s);}catch(e){window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';console.warn('AMIRA cloud sync gagal:',e);}
+}
+async function allSnaps(){
+  let d=await db();
+  const local=await new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).getAll(),q2=tx.objectStore(STORE).getAll();let a=[],b=[];q1.onsuccess=()=>{a=q1.result||[]};q2.onsuccess=()=>{b=q2.result||[]};tx.oncomplete=()=>{d.close();res([...a,...b])};tx.onerror=()=>{d.close();rej(tx.error)}}).catch(()=>[]);
+  const byKey=new Map();
+  for(const x of local){const y={...x,id:x.id||('LEGACY-'+String(x.date||'UNKNOWN')),afdeling:snapAfdeling(x),source:'local'};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>0)byKey.set(k,y)}
+  try{for(const x of await cloudListSnapshots()){const y={...x,id:x.id||`AMIRA-${x.date}-${x.afdeling}`,source:'cloud'};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>=0)byKey.set(k,y)}}catch(e){console.warn('AMIRA cloud history unavailable:',e)}
+  return [...byKey.values()].sort((x,y)=>String(y.date).localeCompare(String(x.date))||String(y.afdeling).localeCompare(String(x.afdeling))||String(y.lockedAt).localeCompare(String(x.lockedAt)));
+}
+async function getSnap(id){
+  try{const cloud=await cloudGetSnapshot(id);if(cloud)return cloud}catch(e){console.warn('AMIRA cloud load unavailable:',e)}
+  let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).get(id);const q2=tx.objectStore(STORE).get(String(id).replace(/^LEGACY-/,''));let a,b;q1.onsuccess=()=>a=q1.result;q2.onsuccess=()=>b=q2.result;tx.oncomplete=()=>{d.close();res(a||b)};tx.onerror=()=>{d.close();rej(tx.error)}})
+}
+async function loadSnap(s){
+  if(s?.source==='cloud' && (!s.files?.length || typeof s.masterRaw==='undefined')){const full=await cloudGetSnapshot(s.id);if(full)s=full}
+  resetFiles();state.masterRaw=await rawText(s.masterRaw||'');if(state.masterRaw){state.master=parseMaster(state.masterRaw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]))}for(const f of s.files||[]){const raw=await rawText(f.raw);mergeFile(parseAmanda(raw),f.name,raw)}state.dataset={status:'LOCKED',date:s.date,locked:true,id:s.id,afdeling:afdelingLabel(s.afdeling||inferAfdelingFromSections(state.sections)||'')};state.ui.afdeling=state.dataset.afdeling||state.ui.afdeling||'OCYM';renderAll()}
 function readFileText(file){return new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(String(fr.result||''));fr.onerror=()=>reject(fr.error||new Error('Gagal membaca file '+file.name));fr.readAsText(file,'UTF-8')})}
 function hydrateMaster(raw){state.masterRaw=raw;state.master=parseMaster(raw);state.jobs=new Map((state.master.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]).filter(x=>x[0]));state.materials=new Map((state.master.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]).filter(x=>x[0]));state.fields=new Map((state.master.sections.M_FIELD||[]).map(r=>[clean(r.BLOKCODE),r]).filter(x=>x[0]));}
 async function uploadMaster(file){const raw=await readFileText(file);const parsed=parseMaster(raw);if(!Object.keys(parsed.sections).length)throw new Error('Master Rawat tidak terbaca.');hydrateMaster(raw);renderAll();}
@@ -253,17 +340,31 @@ async function uploadRaw(files){if(!files?.length)return;if(files.length>4)throw
 function updateControl(){const locked=state.dataset.status==='LOCKED'||state.dataset.locked;const st=$('datasetStatus'),meta=$('datasetMeta');st.textContent=locked?'LOCKED':'DRAFT';st.className='status '+(locked?'locked':'draft');meta.textContent=state.dataset.date?`Tanggal ${state.dataset.date} · ${state.files.length} file · maksimal 4 file Rawat · history lokal + cloud jika dikonfigurasi`: '1–4 file per dataset/afdeling · minimal 1 file untuk LOCKED · semua tanggal harus sama · history dipisahkan date + afdeling';$('lockBtn').disabled=locked||!state.files.length;$('lockBtn2').disabled=locked||!state.files.length;$('reopenBtn').style.display=locked?'inline-block':'none';const d=state.data||buildData();$('recon').innerHTML=state.files.length?`Tanggal <b>${state.dataset.date}</b> · EMPATT ${d.emp.length} · valid ${d.valid.length} · PLANHARIAN ${d.planCount} · T_SIC ${d.sicCount} · T_MATERIAL ${d.materialRows} · GPS ${d.gps.length}`:'Belum ada dataset staged.';}
 function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${s.files?.length||0} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
 async function lock(){if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);const d=state.data||buildData();if(!state.dataset.date)state.dataset.date=d.date;if(!state.dataset.date)throw new Error('Tanggal dataset belum terbaca.');const afd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');if(!AMIRA_AFDELING_OPTIONS.includes(afd))throw new Error(`Dataset harus tepat 1 afdeling (${AMIRA_AFDELING_OPTIONS.join(', ')}). Terdeteksi: ${afd||'—'}`);state.dataset={...state.dataset,status:'LOCKED',locked:true,afdeling:afd,id:`AMIRA-${state.dataset.date}-${afd}`};await saveSnapshotByDate(await snapshot());renderAll();}
-function dailyBasePrice(block,material,uom){
+function racunUnitClass(uom){
+ const u=String(uom||'').toUpperCase().replace(/\s+/g,'');
+ if(/^(GR|G|GRAM|GRAMS)(?:\/|$)/.test(u)||u.includes('GR/'))return'GR';
+ if(/^(L|LT|LTR|LITER|LITRE)(?:\/|$)/.test(u)||u.includes('L/HA')||u.includes('LTR/'))return'L';
+ return '';
+}
+function racunMaterialNorm(material){
  const n=String(material||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
  const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};
- const target=alias[n]||n, unit=String(uom||'').toUpperCase();
- const candidates=(BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===block && String(x.material||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===target);
- if(!candidates.length)return null;
- const gram=/GR|GRAM|G\b/.test(unit);
- const exact=candidates.find(x=>/GR|GRAM|G\b/.test(String(x.uom||'').toUpperCase())===gram);
- return exact||null;
+ return alias[n]||n;
 }
-function monthlyBasePrice(block,material,uom){return dailyBasePrice(block,material,uom);}
+function racunCost(qty,actualUom,base){
+ if(!base)return 0;
+ const au=racunUnitClass(actualUom),bu=racunUnitClass(base.uom);
+ if(!au||!bu||au!==bu)return 0;
+ const q=num(qty),price=num(base.price);
+ return au==='GR'?(q/1000)*price:q*price;
+}
+function dailyBasePrice(block,type,material,uom){
+ const target=racunMaterialNorm(material),unit=racunUnitClass(uom),internal=String(type||'').toUpperCase();
+ if(!block||!internal||!target||!unit)return null;
+ const candidates=(BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===block && String(x.type||'').toUpperCase()===internal && racunMaterialNorm(x.material)===target && racunUnitClass(x.uom)===unit);
+ return candidates[0]||null;
+}
+function monthlyBasePrice(block,type,material,uom){return dailyBasePrice(block,type,material,uom);}
 function dailyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');const s=String(v);return `"${s.replace(/"/g,'""')}"`;}
 function dailyCsvJoin(values){return values.map(dailyCsvCell).join(';')}
 function dailyDownload(){
@@ -275,7 +376,7 @@ function dailyDownload(){
  const workerDay=new Map();
  (d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE),p=num(r.P4);if(!b||!w||p<=0)return;const k=w+'|'+date;if(!workerDay.has(k))workerDay.set(k,{});workerDay.get(k)[b]=(workerDay.get(k)[b]||0)+p;ensure(b).ha+=p;});
  workerDay.forEach(shares=>{const tot=Object.values(shares).reduce((a,v)=>a+v,0);if(!tot)return;Object.entries(shares).forEach(([b,p])=>{const x=ensure(b),share=p/tot;x.hk+=share;x.costHK+=share*hkRate;});});
- (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);const bp=dailyBasePrice(b,a.displayMaterial||a.material,uom),cc=bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0;if(gram){x.racunGr+=qty;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=qty;x.costL=(x.costL||0)+cc;}x.costRacun+=cc;const k=[b,a.type,a.displayMaterial||a.material,uom].join('|');materialMap.set(k,{afdeling:x.afdeling,block:b,type:a.type,material:a.displayMaterial||a.material,uom,qty:(materialMap.get(k)?.qty||0)+qty,cost:(materialMap.get(k)?.cost||0)+(bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0)});});
+ (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);const bp=dailyBasePrice(b,a.type,a.displayMaterial||a.material,uom),cc=racunCost(qty,uom,bp);if(gram){x.racunGr+=qty;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=qty;x.costL=(x.costL||0)+cc;}x.costRacun+=cc;const k=[b,a.type,a.displayMaterial||a.material,uom].join('|');materialMap.set(k,{afdeling:x.afdeling,block:b,type:a.type,material:a.displayMaterial||a.material,uom,qty:(materialMap.get(k)?.qty||0)+qty,cost:(materialMap.get(k)?.cost||0)+(bp?(gram?(qty/1000)*num(bp.price):qty*num(bp.price)):0)});});
  const blocks=[...blockMap.values()].sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true}));
  const jobMap=new Map();(d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),code=clean(r.JOBCODE),p=num(r.P4);if(!b||!code||p<=0)return;const k=[b,code].join('|');const z=jobMap.get(k)||{afdeling:afdelingLabel(afdelingOfBlock(b)),block:b,jobcode:code,job:job(code).DESCRIPTION||code,ws:classify(code,job(code).DESCRIPTION||''),ha:0,workers:new Set};z.ha+=p;const w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE);if(w)z.workers.add(w);jobMap.set(k,z);});
  const lines=[];lines.push(['AMIRA DATA HARIAN','Tanggal',date,'Afdeling',afd].map(dailyCsvCell).join(';'));lines.push(['UMK 2026',Math.round(umk),'HK/Bulan',days,'Nilai 1 HK',Math.round(hkRate)].map(dailyCsvCell).join(';'));lines.push('');lines.push(['REKAP PER BLOK'].map(dailyCsvCell).join(';'));lines.push(['Afdeling','Blok','Ha','HK','Cost HK','Cost HK/Ha','Racun L','Racun gr','Cost Racun L','Cost Racun GR (Rp/KG)','Total Cost Racun','Racun/Ha','Total Cost/Ha'].map(dailyCsvCell).join(';'));
@@ -331,12 +432,12 @@ async function amiraCumulativeMaterialActual(d){
          return bs.size===matSet.size && [...matSet].every(m=>bs.has(m));
        });
        if(candidates.length!==1)return;
-       const type=candidates[0], reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC', st=subtype(type);
+       const type=candidates[0], reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC', reportWorkstream=(jf==='CWC')?'CWC':(jc==='220401'||jc==='220402')?'PATH':(jc==='220503')?'TPH':(jf==='WDC'?'WDC':reportFamily), st=subtype(type);
        items.forEach(it=>{
          const mdesc=mat(it.code).DESCRIPTION||it.code, canonical=norm(mdesc);
          const k=[block,reportFamily,st,canonical].join('|'), q=it.qty*share, prev=out.get(k);
          if(prev)prev.actual+=q;
-         else out.set(k,{block,type:reportFamily,subtype:st,material:mdesc,canonical,actual:q,uom:mat(it.code).UOM||'—'});
+         else out.set(k,{block,type:reportFamily,workstream:reportWorkstream,subtype:st,material:mdesc,canonical,actual:q,uom:mat(it.code).UOM||'—'});
        });
      });
    });
@@ -372,7 +473,7 @@ let amiraBalanceFilter={afdeling:'',workstream:''};
 function renderCumulativeBalanceRows(){
  const el=$('balanceDetail'); if(!el)return;
  const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
- const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||(r.workstream||r.type)===ws));
  const info=$('balanceFilterInfo');
  if(info){const special=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09';info.textContent=`Material Balance: ${rows.length} baris · Afdeling: ${afd||'Semua'} · Workstream: ${ws||'Semua'} · Actual kumulatif ${special?'18 Agustus–20 September 2026 (khusus)':'periode 21–20'}.`; }
  el.innerHTML=rows.sort((a,b)=>a.afdeling.localeCompare(b.afdeling)||a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material))
@@ -396,7 +497,7 @@ function balanceCsvCell(v){
 }
 function downloadCumulativeMaterialBalance(){
  const afd=amiraBalanceFilter.afdeling||'', ws=amiraBalanceFilter.workstream||'';
- const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||r.type===ws));
+ const rows=amiraBalanceRows.filter(r=>(!afd||r.afdeling===afd)&&(!ws||(r.workstream||r.type)===ws));
  if(!rows.length){alert('Tidak ada data Material Balance sesuai filter.');return;}
  const lines=[];
  const balancePeriodLabel=amiraBookPeriod(new Date().toISOString().slice(0,10))==='2026-09'?'18 Agustus 2026 – 20 September 2026':'21–20';lines.push(['AMIRA MATERIAL BALANCE KUMULATIF','Periode',balancePeriodLabel,'Afdeling',afd||'Semua Afdeling','Workstream',ws||'Semua'].map(balanceCsvCell).join(';'));
@@ -425,8 +526,11 @@ async function refreshCumulativeMaterialBalance(){
    const normBal=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const a={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return a[n]||n};
    const subtypeBal=t=>{const m=String(t||'').toUpperCase().match(/^(?:CWC|PTC|WDC)([1-4])$/);return m?m[1]:''};
    const agg=await amiraCumulativeMaterialActual(d);
-   if(!agg.size)return;
    const rows=[];
+   if(!agg.size){
+     if(amiraBalanceRows.length){initMaterialBalanceControls();renderCumulativeBalanceRows();}
+     return;
+   }
    const baseGroups=new Map();
    Object.values(d.prescriptionByBlock||{}).forEach(p=>{
      const internal=String(p.type||'').toUpperCase(), fam=internal.match(/^(CWC|PTC|WDC)/)?.[1]; if(!fam)return;
@@ -440,7 +544,7 @@ async function refreshCumulativeMaterialBalance(){
    agg.forEach(a=>{
      const b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));
      const base=num(b?.total), actual=num(a.actual), diff=actual-base, ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;
-     rows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
+     rows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,workstream:a.workstream||a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base,actual,diff,ha,baseExists:!!b});
    });
    amiraBalanceRows=rows;
    initMaterialBalanceControls();
@@ -616,7 +720,7 @@ function monthlyPeriodOptions(){
  for(let n=0;n<120;n++){const k=`${y}-${String(m).padStart(2,'0')}`;out.push(monthlyPeriodBounds(k));m++;if(m===13){m=1;y++;}}
  return out;
 }
-function monthlyIsGram(uom){return /GR|GRAM|G\b/.test(String(uom||'').toUpperCase());}
+function monthlyIsGram(uom){return racunUnitClass(uom)==='GR';}
 function monthlyWorkerKey(r,date){const worker=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE);return worker?[date,worker].join('|'):'';}
 function monthlyWorkstreamForJob(code,j){const c=clean(code),n=String(j?.DESCRIPTION||'').toUpperCase(),cg=String(j?.KODECGP||j?.CGP||j?.KODE_CGP||'').toUpperCase();if(['220601','220602'].includes(c)||/CIRCLE CHEMIST|CIRCLE WEEDING CHEMIST|\bCWC\b/.test(n))return'CWC';if(['220401','220402'].includes(c)||/PATH CHEMIS|PATH CONTROL CHEMIS|\bPATH CHEMIST\b/.test(n))return'PATH';if(c==='220503'||/TPH CHEMIS|\bTPH CHEMIST\b/.test(n))return'TPH';if(c==='220101'||/CIRCLE WEEDING MANUAL|CW MANU(?:AL)?|\bCWM\b/.test(n))return'CWM';if(['230201','230202'].includes(c)||/WEEDING CHEMIS|FOLLOW UP WEEDING CHEMIS/.test(n))return'WDC';if(cg==='PUPUK'||cg.includes('PUPUK')||/PUPUK|FERTIL/.test(n))return'PUPUK';if(['230101','230102','230103','230301'].includes(c)||/WIPPING|WEEDING|BABAT|DONGKEL|NEPROLEPHIS|LALANG|ANAK KAYU/.test(n))return'WDM';if(c==='240101'||/PRUNING/.test(n))return'PRUNING';return'OTHER';}
 function monthlyBlockShareForWorkerDay(sic,date,worker){
@@ -656,11 +760,22 @@ async function monthlyHistoricalRows(bounds){
    const c=clean(r.JOBCODE),mandor=clean(r.MANDORCODE),rk=[c,mandor,normDate(r.TANGGAL||r.DATE)||date].join('|');
    const sicRows=sicKey[rk]||[];const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(b&&v>0)p4[b]=(p4[b]||0)+v});
    const blocks=Object.keys(p4),tot=blocks.reduce((a,b)=>a+p4[b],0);if(!blocks.length||!tot)return;
+   const rowItems=[];
    for(let i=1;i<=6;i++){
     const mc=clean(r['MAT'+i]||r['MATERIALCODE'+i]),qty=num(r['QTYMAT'+i]||r['QTY'+i]);if(!mc||!qty)continue;
-    const md=localMats.get(mc)||{},name=md.DESCRIPTION||mc,uom=String(md.UOM||'').toUpperCase(),gram=monthlyIsGram(uom),ws=monthlyWorkstreamForJob(c,localJobs.get(c)||{});
-    blocks.forEach(b=>{const share=p4[b]/tot,q=qty*share,x=ensureBlock(b);const bp=monthlyBasePrice(b,name,uom);const cc=bp?(gram?(q/1000)*bp.price:q*bp.price):0;if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else{x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;x.wsCostRacun[ws]=(x.wsCostRacun[ws]||0)+cc;});
+    const md=localMats.get(mc)||{},name=md.DESCRIPTION||mc,uom=String(md.UOM||'').toUpperCase();
+    rowItems.push({mc,qty,name,uom,canonical:racunMaterialNorm(name)});
    }
+   if(!rowItems.length)return;
+   const ws=monthlyWorkstreamForJob(c,localJobs.get(c)||{}),family=ws==='CWC'?'CWC':(ws==='PATH'||ws==='TPH')?'PTC':ws==='WDC'?'WDC':'';
+   blocks.forEach(b=>{
+    const share=p4[b]/tot;
+    const matSet=[...new Set(rowItems.map(it=>it.canonical))];
+    const allowed=family?['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4'].filter(t=>t.startsWith(family)):[];
+    const candidates=allowed.filter(type=>{const bs=new Set((BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===b&&String(x.type||'').toUpperCase()===type).map(x=>racunMaterialNorm(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
+    const internalType=candidates.length===1?candidates[0]:'';
+    rowItems.forEach(it=>{const q=it.qty*share,x=ensureBlock(b),bp=internalType?monthlyBasePrice(b,internalType,it.name,it.uom):null,cc=racunCost(q,it.uom,bp),gram=racunUnitClass(it.uom)==='GR';if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else if(racunUnitClass(it.uom)==='L'){x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;x.wsCostRacun[ws]=(x.wsCostRacun[ws]||0)+cc;});
+   });
   });
   Object.values(blockMap).forEach(x=>out.push({date,...x}));
  }
@@ -754,7 +869,7 @@ async function dailyAllAfdelingData(targetDate){
      (d.sic||[]).forEach(r=>{const b=clean(r.BLOKCODE),w=clean(r.EMPNO||r.EMPCODE||r.NAMA||r.NIK||r.EMPLOYEE),p=num(r.P4);if(!b||!w||p<=0)return;const k=w+'|'+date;if(!workerDay.has(k))workerDay.set(k,{});workerDay.get(k)[b]=(workerDay.get(k)[b]||0)+p;ensure(b).ha+=p;});
      const umk=Math.max(0,num($('monthlyUmk')?.value)||3909005),days=Math.max(1,amiraCalendarHK(date,date)),hkRate=umk/days;
      workerDay.forEach(shares=>{const tot=Object.values(shares).reduce((a,v)=>a+v,0);if(!tot)return;Object.entries(shares).forEach(([b,p])=>{const x=ensure(b),share=p/tot;x.hk+=share;x.costHK+=share*hkRate;});});
-     (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);if(gram)x.racunGr+=qty;else x.racunL+=qty;const bp=dailyBasePrice(b,a.displayMaterial||a.material,uom);if(bp)x.costRacun+=gram?(qty/1000)*num(bp.price):qty*num(bp.price);});
+     (d.actualSprayUsage?Object.values(d.actualSprayUsage):[]).forEach(a=>{const b=clean(a.block);if(!b)return;const x=ensure(b),qty=num(a.qty),uom=String(a.uom||'').toUpperCase(),gram=/GR|GRAM|G\\b/.test(uom);if(gram)x.racunGr+=qty;else x.racunL+=qty;const bp=dailyBasePrice(b,a.type,a.displayMaterial||a.material,uom);if(bp)x.costRacun+=racunCost(qty,uom,bp);});
      blockMap.forEach(x=>{const k=x.afdeling+'|'+x.block;const z=allBlocks.get(k)||{afdeling:x.afdeling,block:x.block,ha:0,hk:0,costHK:0,racunL:0,racunGr:0,costRacun:0};z.ha+=x.ha;z.hk+=x.hk;z.costHK+=x.costHK;z.racunL+=x.racunL;z.racunGr+=x.racunGr;z.costRacun+=x.costRacun;allBlocks.set(k,z);});
    }
  }finally{Object.assign(state,old);}
@@ -976,8 +1091,8 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
  renderSpecialPage('page-pupuk','PUPUK',pd.rows,'Pupuk',pd.qtyKg);
  renderSpecialPage('page-pruning','PRUNING',pruningPageRows,'Racun',dashboardWorkstreamData(d).pruning.racun);
  const normBalanceMat=s=>{let n=String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');const alias={'GLIPHOSATE':'GLYPHOSATE','METHIL':'METIL','AMMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT','AMONIUMGLUFOSINATE':'AMONIUMGLUFOSINAT'};return alias[n]||n};
- const rawMaterialRows=[]; (d.mats||[]).forEach(r=>{const date=normDate(r.TANGGAL)||normDate(r.DATE)||d.date||'—'; const directBlock=clean(r.BLOKCODE||r.BLOCKCODE||r.BLOCK); const resolvedBlocks=[...(d.sicByKeyMap?.[[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')]||[])].filter(Boolean); const targetBlocks=directBlock?[directBlock]:resolvedBlocks; const sicRows=(d.sic||[]).filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')&&clean(x.BLOKCODE)); const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(v>0)p4[b]=(p4[b]||0)+v}); const totalP4=targetBlocks.reduce((a,b)=>a+(p4[b]||0),0); for(let i=1;i<=6;i++){const code=clean(r['MAT'+i]||r['MATERIALCODE'+i]); const qty=num(r['QTYMAT'+i]||r['QTY'+i]); if(!code||!qty)continue; const md=mat(code); if(!targetBlocks.length){rawMaterialRows.push({date,block:'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty,uom:md.UOM||'—'});continue;} targetBlocks.forEach(b=>{const share=directBlock?1:(totalP4>0?(p4[b]||0)/totalP4:1/targetBlocks.length);rawMaterialRows.push({date,block:b||'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty:qty*share,uom:md.UOM||'—'});});}});
- $('materialDetail').innerHTML=rawMaterialRows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.job.localeCompare(b.job)||a.code.localeCompare(b.code)).map(v=>`<tr><td>${v.date}</td><td>${v.block}</td><td>${itemName(v.job)}</td><td><b>${v.material}</b></td><td>${v.code}</td><td>${fmt(v.qty)}</td><td>${v.uom}</td><td>${v.job}</td></tr>`).join('')||`<tr><td colspan="8" class="empty">Belum ada racun aktual dari T_MATERIAL.</td></tr>`;
+ const rawMaterialRows=[]; (d.mats||[]).forEach(r=>{const date=normDate(r.TANGGAL)||normDate(r.DATE)||d.date||'—'; const directBlock=clean(r.BLOKCODE||r.BLOCKCODE||r.BLOCK); const resolvedBlocks=[...(d.sicByKeyMap?.[[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')]||[])].filter(Boolean); const targetBlocks=directBlock?[directBlock]:resolvedBlocks; const sicRows=(d.sic||[]).filter(x=>[clean(x.JOBCODE),clean(x.MANDORCODE),normDate(x.TANGGAL||x.DATE)].join('|')===[clean(r.JOBCODE),clean(r.MANDORCODE),normDate(r.TANGGAL||r.DATE)].join('|')&&clean(x.BLOKCODE)); const p4={};sicRows.forEach(x=>{const b=clean(x.BLOKCODE),v=num(x.P4);if(v>0)p4[b]=(p4[b]||0)+v}); const totalP4=targetBlocks.reduce((a,b)=>a+(p4[b]||0),0); for(let i=1;i<=6;i++){const code=clean(r['MAT'+i]||r['MATERIALCODE'+i]); const qty=num(r['QTYMAT'+i]||r['QTY'+i]); if(!code||!qty)continue; const md=mat(code); if(!targetBlocks.length){rawMaterialRows.push({date,block:'—',job:clean(r.JOBCODE)||'—',code,material:md.DESCRIPTION||code,qty,uom:md.UOM||'—',price:0,cost:0});continue;} targetBlocks.forEach(b=>{const share=directBlock?1:(totalP4>0?(p4[b]||0)/totalP4:1/targetBlocks.length);const q=qty*share, blockNorm=b||'—', jobCode=clean(r.JOBCODE)||'—', materialName=md.DESCRIPTION||code, uom=md.UOM||'—'; const actualMatch=Object.values(d.actualSprayUsage||{}).find(a=>clean(a.block)===blockNorm&&clean(a.job)===jobCode&&clean(a.code)===code&&racunUnitClass(a.uom)===racunUnitClass(uom)); const bp=actualMatch?dailyBasePrice(blockNorm,actualMatch.type,materialName,uom):null; const cc=bp?racunCost(q,uom,bp):0; rawMaterialRows.push({date,block:blockNorm,job:jobCode,code,material:materialName,qty:q,uom,price:bp?num(bp.price):0,cost:cc});});}});
+ $('materialDetail').innerHTML=rawMaterialRows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||a.block.localeCompare(b.block,undefined,{numeric:true})||a.job.localeCompare(b.job)||a.code.localeCompare(b.code)).map(v=>{const ru=racunUnitClass(v.uom),unit=ru==='L'?'Rp/L':ru==='GR'?'Rp/Kg':'';return`<tr><td>${v.date}</td><td>${v.block}</td><td>${itemName(v.job)}</td><td><b>${v.material}</b></td><td>${v.code}</td><td>${fmt(v.qty)}</td><td>${ru==='L'?'L':ru==='GR'?'GR':v.uom}</td><td>${v.price?`Rp ${fmt(v.price)} ${unit}`:'—'}</td><td>${v.cost?`Rp ${fmt(v.cost)}`:'Rp 0'}</td><td>${v.job}</td></tr>`}).join('')||`<tr><td colspan="10" class="empty">Belum ada racun aktual dari T_MATERIAL.</td></tr>`;
  // MATERIAL BALANCE — Engine 05 Actual T_MATERIAL minus Engine 06 Base Prescription.
  const balanceRows=[];
 
@@ -1002,7 +1117,8 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
      const share=(p4ByBlock[block]||0)/totalP4;
      const candidates=allowed.filter(type=>{const bs=new Set((d.prescriptionByBlock?.[[block,type].join('|')]?.items||[]).map(x=>normBalanceMat(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
      const subtype=candidates.length===1?subtypeOfType(candidates[0]):''; const reportFamily=(jf==='CWC'||jf==='PTC')?'CPT':'WDC';
-     items.forEach(it=>{const qty=it.qty*share,k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,subtype,material:it.material,canonical:it.canonical,qty,uom:it.uom,jobs:new Set([jobCode]),date});});
+     const reportWorkstream=(jf==='CWC')?'CWC':(jobCode==='220401'||jobCode==='220402')?'PATH':(jobCode==='220503')?'TPH':(jf==='WDC'?'WDC':reportFamily);
+     items.forEach(it=>{const qty=it.qty*share,k=[block,reportFamily,subtype,it.canonical].join('|'),prev=actualMap.get(k);if(prev){prev.qty+=qty;prev.jobs.add(jobCode);}else actualMap.set(k,{block,type:reportFamily,workstream:reportWorkstream,subtype,material:it.material,canonical:it.canonical,qty,uom:it.uom,jobs:new Set([jobCode]),date});});
    });
  });
 
@@ -1011,7 +1127,7 @@ function renderPages(){let d=state.data||buildData();const workerItemHa=new Map(
  Object.values(d.prescriptionByBlock||{}).forEach(p=>{const internal=String(p.type||'').toUpperCase(),fam=familyOfType(internal);if(!fam)return;const reportFamily=(fam==='CWC'||fam==='PTC')?'CPT':'WDC',subtype=subtypeOfType(internal);p.items.forEach(x=>{const canonical=normBalanceMat(x.material),k=[p.block,reportFamily,subtype,canonical].join('|'),prev=baseGroups.get(k);if(prev){prev.total+=num(x.total);prev.dose+=num(x.dose);prev.cost+=num(x.cost);}else baseGroups.set(k,{block:p.block,type:reportFamily,subtype,material:x.material,total:num(x.total),dose:num(x.dose),cost:num(x.cost),ha:num(p.ha),uom:x.uom||'',price:num(x.price)});});});
 
  // ENGINE 07: ALWAYS show every actual material usage. Actual - Base when base exists.
- actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
+ actualMap.forEach(a=>{let b=baseGroups.get([a.block,a.type,a.subtype,a.canonical].join('|'));if(!b&&!a.subtype){const cand=[...baseGroups.values()].filter(x=>x.block===a.block&&x.type===a.type&&x.canonical===a.canonical);if(cand.length===1)b=cand[0];}const baseQty=num(b?.total),actual=num(a.qty),diff=actual-baseQty,ha=num(b?.ha)||hestiHa(a.block,'HESTI')||0;balanceRows.push({afdeling:afdelingLabel(afdelingOfBlock(a.block)),block:a.block,type:a.type,workstream:a.workstream||a.type,typeInternal:a.subtype?`${a.type}${a.subtype}`:'UNMAPPED',material:b?.material||a.material,uom:b?.uom||a.uom||'—',base:baseQty,actual,diff,ha,baseExists:!!b});});
  $('balanceDetail').innerHTML=balanceRows.sort((a,b)=>a.block.localeCompare(b.block,undefined,{numeric:true})||a.type.localeCompare(b.type)||a.material.localeCompare(b.material)).map(r=>{const dose=r.ha?r.actual/r.ha:0,over=r.baseExists&&r.diff>0.000001,status=!r.baseExists?'🟡 NO BASE':over?'🔴 OVER BASE':'🟢 ≤ BASE';return`<tr class="${over?'overRow':''}"><td>${r.block}</td><td>${r.type}${r.typeInternal!=='UNMAPPED'?` · ${r.typeInternal}`:''}</td><td><b>${r.material}</b></td><td>${r.baseExists?fmt(r.base):'—'}</td><td>${fmt(r.actual)}</td><td>${r.baseExists?fmt(r.diff):'—'}</td><td>${r.ha?fmt(dose)+' '+(/GR|G/.test(String(r.uom).toUpperCase())?'Gr/Ha':'L/Ha'):'—'}</td><td>${r.uom}</td><td>${status}</td></tr>`}).join('')||`<tr><td colspan="9" class="empty">Belum ada penggunaan material aktual dari T_MATERIAL.</td></tr>`;
  $('planDetail').innerHTML=`<table><thead><tr><th>WS</th><th>Plan Ha</th><th>Real Ha</th><th>Achievement</th></tr></thead><tbody>${WS.map(w=>`<tr><td>${w}</td><td>${fmt(d.planWS[w])}</td><td>${fmt(d.actualWS[w])}</td><td>${d.planWS[w]?fmt(pct(d.actualWS[w],d.planWS[w]))+'%':'—'}</td></tr>`).join('')}</tbody></table>`;
  const ihr=itemHKRows();$('itemHKDetail').innerHTML=ihr.map(x=>{const ha=x.hk?((workerItemHa.get([x.date,x.block,x.code].join('|'))||0)):0;return`<tr><td>${x.date||'—'}</td><td>${x.block}</td><td>${x.ws}</td><td><b>${itemName(x.code)}</b></td><td>${x.code}</td><td>${fmt(x.hk)}</td><td>${fmt(ha)}</td><td>${x.hk?fmt(ha/x.hk):'—'}</td></tr>`}).join('')||`<tr><td colspan="8" class="empty">Belum ada item activity.</td></tr>`;
