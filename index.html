@@ -102,6 +102,9 @@ window.AMIRA_FIREBASE_READY = (async function(){
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
+    // Mobile/network compatibility: force Firestore long-polling so restrictive
+    // carrier/proxy connections do not leave the WebChannel hanging.
+    db.settings({experimentalForceLongPolling:true, useFetchStreams:false});
     if (!auth.currentUser) await auth.signInAnonymously();
     window.AMIRA_FIREBASE = {db, auth, app: firebase.app()};
     window.AMIRA_CLOUD_LAST_STATUS = 'CONNECTED';
