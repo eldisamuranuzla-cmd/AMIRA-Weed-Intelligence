@@ -451,9 +451,21 @@ function racunCost(qty,actualUom,base){
 }
 function dailyBasePrice(block,type,material,uom){
  const target=racunMaterialNorm(material),unit=racunUnitClass(uom),internal=String(type||'').toUpperCase();
- if(!block||!internal||!target||!unit)return null;
- const candidates=(BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===block && String(x.type||'').toUpperCase()===internal && racunMaterialNorm(x.material)===target && racunUnitClass(x.uom)===unit);
- return candidates[0]||null;
+ if(!block||!target||!unit)return null;
+ const base=(BASE_RACUN_ALL_AFD||[]);
+ // 1) Exact prescription match remains the source of truth.
+ let candidates=base.filter(x=>x.block===block && String(x.type||'').toUpperCase()===internal && racunMaterialNorm(x.material)===target && racunUnitClass(x.uom)===unit);
+ if(candidates.length)return candidates[0];
+ // 2) Some T_MATERIAL rows identify the family/job while the subtype is resolved
+ //    separately. Fall back only within the same block + material + UOM family,
+ //    and only when all matching base rows have the same price. L and GR are
+ //    never mixed.
+ const family=internal.match(/^(CWC|PTC|WDC)/)?.[1]||'';
+ if(!family)return null;
+ candidates=base.filter(x=>x.block===block && String(x.type||'').toUpperCase().startsWith(family) && racunMaterialNorm(x.material)===target && racunUnitClass(x.uom)===unit);
+ if(!candidates.length)return null;
+ const prices=[...new Set(candidates.map(x=>Number(x.price)).filter(Number.isFinite))];
+ return prices.length===1?candidates[0]:null;
 }
 function monthlyBasePrice(block,type,material,uom){return dailyBasePrice(block,type,material,uom);}
 function dailyCsvCell(v){if(v===null||v===undefined||v==='')return '';if(typeof v==='number'&&Number.isFinite(v))return String(v).replace('.',',');const s=String(v);return `"${s.replace(/"/g,'""')}"`;}
