@@ -286,15 +286,30 @@ async function amiraRestFetch(path, options={}, timeoutMs=20000){
   const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),timeoutMs);
   try{
     const headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},options.headers||{});
-    const res=await fetch('https://firestore.googleapis.com/v1/'+path,{...options,headers,signal:ctrl.signal});
+    const url='https://firestore.googleapis.com/v1/'+path;
+    const res=await fetch(url,{...options,headers,signal:ctrl.signal});
     const txt=await res.text();
     let body=null; try{body=txt?JSON.parse(txt):null}catch(_e){body=txt}
-    if(!res.ok){const msg=body?.error?.message||`HTTP ${res.status} ${res.statusText}`;const err=new Error(msg);err.code=body?.error?.status||`HTTP_${res.status}`;throw err;}
+    if(!res.ok){
+      const apiErr=body?.error||{};
+      const err=new Error(apiErr.message||`HTTP ${res.status} ${res.statusText}`);
+      err.code=apiErr.status||`HTTP_${res.status}`;
+      err.httpStatus=res.status;
+      err.errorDetails=apiErr.details||null;
+      err.rawBody=txt;
+      console.error('AMIRA FIRESTORE REST ERROR',{url,httpStatus:res.status,code:err.code,message:err.message,details:err.errorDetails,rawBody:txt});
+      throw err;
+    }
     return body;
   }catch(e){
     if(e?.name==='AbortError') throw new Error(`Timeout ${timeoutMs/1000} detik saat menghubungi Firestore REST.`);
     throw e;
   }finally{clearTimeout(timer)}
+}
+async function amiraFirestoreProbe(){
+  const fb=await amiraCloud();
+  if(!fb?.auth?.currentUser) throw new Error('Firebase Anonymous Auth belum siap.');
+  return await amiraRestFetch(`${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}?pageSize=1`,{method:'GET'},15000);
 }
 function fsVal(v){
   if(v===null||typeof v==='undefined') return {nullValue:null};
@@ -308,6 +323,12 @@ function fsDocPath(collection,id){return `${AMIRA_FS_BASE}/documents/${collectio
 function fsChunkPath(datasetId,chunkId){return `${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}/${encodeURIComponent(String(datasetId))}/chunks/${encodeURIComponent(String(chunkId))}`}
 async function cloudSaveSnapshot(s){
   const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
+  try{ await amiraFirestoreProbe(); }catch(e){
+    const detail=e?.errorDetails?` details=${JSON.stringify(e.errorDetails).slice(0,900)}`:'';
+    const raw=e?.rawBody?` raw=${String(e.rawBody).slice(0,1200)}`:'';
+    const http=e?.httpStatus?` HTTP ${e.httpStatus}`:'';
+    throw new Error(`Firestore probe gagal${http} [${e?.code||'UNKNOWN'}]: ${e?.message||e}${detail}${raw}`);
+  }
   const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`);
   const master=await rawText(s.masterRaw||'');
   const files=[]; for(const f of (s.files||[])) files.push({name:f.name,raw:await rawText(f.raw||'')});
