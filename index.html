@@ -273,6 +273,9 @@ async function clearHistory(){let d=await db();return new Promise((res,rej)=>{co
 const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=450000;
 async function amiraCloud(){try{return await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));}catch(e){return null}}
 function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;i<s.length;i+=AMIRA_CLOUD_CHUNK)out.push(s.slice(i,i+AMIRA_CLOUD_CHUNK));return out.length?out:['']}
+function amiraTimeout(promise,ms=20000){
+  return Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error('Timeout 20 detik saat menghubungi Firestore.')),ms))]);
+}
 async function cloudSaveSnapshot(s){
   const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
   const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`), ref=fb.db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
@@ -314,7 +317,7 @@ async function cloudGetSnapshot(id){
 async function saveSnapshotByDate(s){
   // Firebase menjadi gate sebelum dataset dianggap berhasil tersimpan/LOCKED.
   try{
-    await cloudSaveSnapshot(s);
+    await amiraTimeout(cloudSaveSnapshot(s),20000);
   }catch(e){
     window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';
     const code=e?.code?` [${e.code}]`:'';
@@ -349,7 +352,29 @@ async function uploadRaw(files){if(!files?.length)return;if(files.length>4)throw
  resetFiles();loaded.forEach(x=>mergeFile(x.parsed,x.file.name,x.raw));const inferredAfdeling=afdelingLabel(inferAfdelingFromSections(state.sections)||'MULTI');state.dataset={status:'DRAFT',date:dates[0],locked:false,id:'',afdeling:inferredAfdeling};state.ui.afdeling=inferredAfdeling==='MULTI'?state.ui.afdeling:inferredAfdeling;renderAll();}
 function updateControl(){const locked=state.dataset.status==='LOCKED'||state.dataset.locked;const st=$('datasetStatus'),meta=$('datasetMeta');st.textContent=locked?'LOCKED':'DRAFT';st.className='status '+(locked?'locked':'draft');meta.textContent=state.dataset.date?`Tanggal ${state.dataset.date} · ${state.files.length} file · maksimal 4 file Rawat · history lokal + cloud jika dikonfigurasi`: '1–4 file per dataset/afdeling · minimal 1 file untuk LOCKED · semua tanggal harus sama · history dipisahkan date + afdeling';$('lockBtn').disabled=locked||!state.files.length;$('lockBtn2').disabled=locked||!state.files.length;$('reopenBtn').style.display=locked?'inline-block':'none';const d=state.data||buildData();$('recon').innerHTML=state.files.length?`Tanggal <b>${state.dataset.date}</b> · EMPATT ${d.emp.length} · valid ${d.valid.length} · PLANHARIAN ${d.planCount} · T_SIC ${d.sicCount} · T_MATERIAL ${d.materialRows} · GPS ${d.gps.length}`:'Belum ada dataset staged.';}
 function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${s.files?.length||0} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
-async function lock(){if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);const d=state.data||buildData();if(!state.dataset.date)state.dataset.date=d.date;if(!state.dataset.date)throw new Error('Tanggal dataset belum terbaca.');const afd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');if(!AMIRA_AFDELING_OPTIONS.includes(afd))throw new Error(`Dataset harus tepat 1 afdeling (${AMIRA_AFDELING_OPTIONS.join(', ')}). Terdeteksi: ${afd||'—'}`);state.dataset={...state.dataset,status:'LOCKED',locked:true,afdeling:afd,id:`AMIRA-${state.dataset.date}-${afd}`};await saveSnapshotByDate(await snapshot());renderAll();}
+async function lock(){
+  if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');
+  if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);
+  const d=state.data||buildData();
+  if(!state.dataset.date)state.dataset.date=d.date;
+  if(!state.dataset.date)throw new Error('Tanggal dataset belum terbaca.');
+  const afd=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');
+  if(!AMIRA_AFDELING_OPTIONS.includes(afd))throw new Error(`Dataset harus tepat 1 afdeling (${AMIRA_AFDELING_OPTIONS.join(', ')}). Terdeteksi: ${afd||'—'}`);
+  const previous={...state.dataset};
+  const candidate={...state.dataset,status:'LOCKED',locked:true,afdeling:afd,id:`AMIRA-${state.dataset.date}-${afd}`};
+  const b1=$('lockBtn'),b2=$('lockBtn2');
+  if(b1){b1.disabled=true;b1.textContent='⏳ SYNC FIREBASE...';}
+  if(b2){b2.disabled=true;b2.textContent='⏳ SYNC FIREBASE...';}
+  try{
+    state.dataset=candidate;
+    await saveSnapshotByDate(await snapshot());
+    renderAll();
+  }catch(e){
+    state.dataset=previous;
+    renderAll();
+    throw e;
+  }
+}
 function racunUnitClass(uom){
  const u=String(uom||'').toUpperCase().replace(/\s+/g,'');
  if(/^(GR|G|GRAM|GRAMS)(?:\/|$)/.test(u)||u.includes('GR/'))return'GR';
