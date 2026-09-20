@@ -93,9 +93,9 @@ window.AMIRA_FIREBASE_READY = (async function(){
   try {
     const firebaseConfig = {
       apiKey: "AIzaSyDGvAVIVOF3nIRKYk2qHSLrnwrFpOHVFCk",
-      authDomain: "amira-field-intelligence.firebaseapp.com",
-      projectId: "amira-field-intelligence",
-      storageBucket: "amira-field-intelligence.firebasestorage.app",
+      authDomain: "amira-field-intelegence.firebaseapp.com",
+      projectId: "amira-field-intelegence",
+      storageBucket: "amira-field-intelegence.firebasestorage.app",
       messagingSenderId: "863408824429",
       appId: "1:863408824429:web:cef1d6dba78bafb8b8df64"
     };
@@ -318,7 +318,7 @@ function fsVal(v){
   return {stringValue:String(v)};
 }
 function fsFields(obj){const out={};for(const [k,v] of Object.entries(obj||{}))out[k]=fsVal(v);return out;}
-const AMIRA_FS_BASE='projects/amira-field-intelligence/databases/(default)';
+const AMIRA_FS_BASE='projects/amira-field-intelegence/databases/(default)';
 function fsDocPath(collection,id){return `${AMIRA_FS_BASE}/documents/${collection}/${encodeURIComponent(String(id))}`}
 function fsChunkPath(datasetId,chunkId){return `${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}/${encodeURIComponent(String(datasetId))}/chunks/${encodeURIComponent(String(chunkId))}`}
 async function cloudSaveSnapshot(s){
