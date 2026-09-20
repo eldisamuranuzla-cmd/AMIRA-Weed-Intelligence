@@ -245,10 +245,10 @@ function buildData(){
      for(const type of ['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4']){
        if(family && !type.startsWith(family))continue;
        const bs=new Set(baseTypeItems(block,type).map(x=>normMat(x.material)));
-       if(bs.size===matSet.size && [...matSet].every(m=>bs.has(m)))candidates.push(type);
+       if([...matSet].every(m=>bs.has(m)))candidates.push(type);
      }
-     if(candidates.length!==1){unmappedMaterial.push({reason:'PRESCRIPTION_NOT_UNIQUE',block,w,family,key,items,candidates,share});return}
-     const type=candidates[0];
+     if(!candidates.length){unmappedMaterial.push({reason:'PRESCRIPTION_NOT_FOUND',block,w,family,key,items,candidates,share});return}
+     const type=candidates.length===1?candidates[0]:family;
      items.forEach(it=>{
        const md=mat(it.mc),name=md.DESCRIPTION||it.mc,uom=String(md.UOM||'').toUpperCase(),canonical=normMat(name),k=[block,type,canonical].join('|');
        actualSprayUsage[k]??={block,type,material:canonical,displayMaterial:name,code:it.mc,qty:0,uom,ws:w,date:clean(r.TANGGAL),job:c};
@@ -875,8 +875,8 @@ async function monthlyHistoricalRows(bounds){
     const share=p4[b]/tot;
     const matSet=[...new Set(rowItems.map(it=>it.canonical))];
     const allowed=family?['CWC1','CWC2','CWC3','CWC4','PTC1','PTC2','PTC3','PTC4','WDC1','WDC2','WDC3','WDC4'].filter(t=>t.startsWith(family)):[];
-    const candidates=allowed.filter(type=>{const bs=new Set((BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===b&&String(x.type||'').toUpperCase()===type).map(x=>racunMaterialNorm(x.material)));return bs.size===matSet.length&&matSet.every(m=>bs.has(m));});
-    const internalType=candidates.length===1?candidates[0]:'';
+    const candidates=allowed.filter(type=>{const bs=new Set((BASE_RACUN_ALL_AFD||[]).filter(x=>x.block===b&&String(x.type||'').toUpperCase()===type).map(x=>racunMaterialNorm(x.material)));return matSet.every(m=>bs.has(m));});
+    const internalType=candidates.length===1?candidates[0]:(candidates.length>1?family:'');
     rowItems.forEach(it=>{const q=it.qty*share,x=ensureBlock(b),bp=internalType?monthlyBasePrice(b,internalType,it.name,it.uom):null,cc=racunCost(q,it.uom,bp),gram=racunUnitClass(it.uom)==='GR';if(gram){x.racunGr+=q;x.costGr=(x.costGr||0)+cc;}else if(racunUnitClass(it.uom)==='L'){x.racunL+=q;x.costL=(x.costL||0)+cc;}x.cost+=cc;x.wsCostRacun[ws]=(x.wsCostRacun[ws]||0)+cc;});
    });
   });
