@@ -332,7 +332,7 @@ async function cloudSaveSnapshot(s){
   // could be rejected by Google API consumer/API-key routing with 403
   // CONSUMER_INVALID even though Firebase Auth and Firestore Rules were valid.
   const db=fb.db;
-  window.AMIRA_CLOUD_SYNC_DEBUG={id,stage:'START',afdeling:afd||snapAfdeling(s),fileCount:files.length};
+  window.AMIRA_CLOUD_SYNC_DEBUG={id,stage:'START',afdeling:snapAfdeling(s),fileCount:files.length};
   if(typeof db.enableNetwork==='function'){
     window.AMIRA_CLOUD_SYNC_DEBUG.stage='ENABLE_NETWORK';
     try{ await db.enableNetwork(); }catch(e){
