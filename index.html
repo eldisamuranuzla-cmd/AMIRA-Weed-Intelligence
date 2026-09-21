@@ -93,9 +93,9 @@ window.AMIRA_FIREBASE_READY = (async function(){
   try {
     const firebaseConfig = {
       apiKey: "AIzaSyDGvAVIVOF3nIRKYk2qHSLrnwrFpOHVFCk",
-      authDomain: "amira-field-intelegence.firebaseapp.com",
-      projectId: "amira-field-intelegence",
-      storageBucket: "amira-field-intelegence.firebasestorage.app",
+      authDomain: "amira-field-intelligence.firebaseapp.com",
+      projectId: "amira-field-intelligence",
+      storageBucket: "amira-field-intelligence.firebasestorage.app",
       messagingSenderId: "863408824429",
       appId: "1:863408824429:web:cef1d6dba78bafb8b8df64"
     };
@@ -314,7 +314,7 @@ function fsVal(v){
   return {stringValue:String(v)};
 }
 function fsFields(obj){const out={};for(const [k,v] of Object.entries(obj||{}))out[k]=fsVal(v);return out;}
-const AMIRA_FS_BASE='projects/amira-field-intelegence/databases/(default)';
+const AMIRA_FS_BASE='projects/amira-field-intelligence/databases/(default)';
 function fsDocPath(collection,id){return `${AMIRA_FS_BASE}/documents/${collection}/${encodeURIComponent(String(id))}`}
 function fsChunkPath(datasetId,chunkId){return `${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}/${encodeURIComponent(String(datasetId))}/chunks/${encodeURIComponent(String(chunkId))}`}
 async function cloudSaveSnapshot(s){
@@ -410,6 +410,21 @@ async function allSnaps(){
   try{for(const x of await cloudListSnapshots()){const y={...x,id:x.id||`AMIRA-${x.date}-${x.afdeling}`,source:'cloud'};const k=String(y.date||'UNKNOWN')+'|'+String(y.afdeling||'');const old=byKey.get(k);if(!old||String(y.lockedAt||'').localeCompare(String(old.lockedAt||''))>=0)byKey.set(k,y)}}catch(e){console.warn('AMIRA cloud history unavailable:',e)}
   return [...byKey.values()].sort((x,y)=>String(y.date).localeCompare(String(x.date))||String(y.afdeling).localeCompare(String(x.afdeling))||String(y.lockedAt).localeCompare(String(x.lockedAt)));
 }
+async function amiraReportSnapshot(snap){
+  // Reports must never depend on browser-local IndexedDB for cloud datasets.
+  // Cloud metadata has no files array, so rehydrate the complete snapshot.
+  if(!snap)return null;
+  if(snap.source==='cloud' || !Array.isArray(snap.files) || !snap.files.length){
+    try{
+      const full=await cloudGetSnapshot(snap.id);
+      if(full)return full;
+    }catch(e){
+      console.warn('AMIRA report cloud restore failed',snap.id,e);
+      if(snap.source==='cloud')throw e;
+    }
+  }
+  return snap;
+}
 async function getSnap(id){
   try{const cloud=await cloudGetSnapshot(id);if(cloud)return cloud}catch(e){console.warn('AMIRA cloud load unavailable:',e)}
   let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readonly');const q1=tx.objectStore(HSTORE).get(id);const q2=tx.objectStore(STORE).get(String(id).replace(/^LEGACY-/,''));let a,b;q1.onsuccess=()=>a=q1.result;q2.onsuccess=()=>b=q2.result;tx.oncomplete=()=>{d.close();res(a||b)};tx.onerror=()=>{d.close();rej(tx.error)}})
@@ -447,7 +462,7 @@ async function uploadRaw(files){if(!files?.length)return;if(files.length>4)throw
  // Upload hanya mengganti dataset yang sedang staged. Historical tanggal lain tetap tersimpan.
  resetFiles();loaded.forEach(x=>mergeFile(x.parsed,x.file.name,x.raw));const inferredAfdeling=afdelingLabel(inferAfdelingFromSections(state.sections)||'MULTI');state.dataset={status:'DRAFT',date:dates[0],locked:false,id:'',afdeling:inferredAfdeling};state.ui.afdeling=inferredAfdeling==='MULTI'?state.ui.afdeling:inferredAfdeling;renderAll();}
 function updateControl(){const locked=state.dataset.status==='LOCKED'||state.dataset.locked;const st=$('datasetStatus'),meta=$('datasetMeta');st.textContent=locked?'LOCKED':'DRAFT';st.className='status '+(locked?'locked':'draft');meta.textContent=state.dataset.date?`Tanggal ${state.dataset.date} · ${state.files.length} file · maksimal 4 file Rawat · history lokal + cloud jika dikonfigurasi`: '1–4 file per dataset/afdeling · minimal 1 file untuk LOCKED · semua tanggal harus sama · history dipisahkan date + afdeling';$('lockBtn').disabled=locked||!state.files.length;$('lockBtn2').disabled=locked||!state.files.length;$('reopenBtn').style.display=locked?'inline-block':'none';const d=state.data||buildData();$('recon').innerHTML=state.files.length?`Tanggal <b>${state.dataset.date}</b> · EMPATT ${d.emp.length} · valid ${d.valid.length} · PLANHARIAN ${d.planCount} · T_SIC ${d.sicCount} · T_MATERIAL ${d.materialRows} · GPS ${d.gps.length}`:'Belum ada dataset staged.';}
-function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${s.files?.length||0} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
+function updateHistory(){const el=$('historyList');if(!el)return;allSnaps().then(arr=>{if(!arr.length){el.innerHTML='<div class="empty">Belum ada historical dataset.</div>';return}el.innerHTML=arr.map(s=>`<div class="historyRow"><div><b>${s.date}</b> · <b>${esc(afdelingLabel(s.afdeling||snapAfdeling(s)||'—'))}</b><br><small>${Array.isArray(s.files)?s.files.length:(Number(s.fileCount)||0)} file · ${s.status||'LOCKED'}</small></div><div>${s.lockedAt?new Date(s.lockedAt).toLocaleString('id-ID'):''}</div><div>LOCKED</div><div>${s.id||'—'}</div><div><button class="btn secondary" data-load="${s.id}">Buka</button></div></div>`).join('');el.querySelectorAll('[data-load]').forEach(b=>b.onclick=async()=>{const snap=await getSnap(b.dataset.load);if(snap){await loadSnap(snap);showPage('dashboard')}})}).catch(err=>{el.innerHTML=`<div class="empty">History gagal dibaca: ${err.message}</div>`})}
 async function lock(){
   if(!state.files.length)throw new Error('Upload Rawat terlebih dahulu.');
   if(state.files.length>4)throw new Error(`Maksimal 4 file Rawat per dataset. Saat ini ${state.files.length}/4 file.`);
@@ -602,14 +617,15 @@ async function amiraCumulativeMaterialActual(d){
  for(const snap of snaps){
    if(String(snap.status||'LOCKED').toUpperCase()!=='LOCKED')continue;
    if(amiraBookPeriod(snap.date)!==targetPeriod)continue;
-   // If the current UI is already loaded from this locked snapshot, it is included once here.
-   const parsedMaster=await rawText(snap.masterRaw||'');
+   const full=await amiraReportSnapshot(snap);
+   if(!full)continue;
+   const parsedMaster=await rawText(full.masterRaw||'');
    if(parsedMaster){
      const pm=parseMaster(parsedMaster);
      state.__amiraTempMaster=pm;
    }
    const sic=[],mats=[];
-   for(const f of snap.files||[]){
+   for(const f of full.files||[]){
      const raw=await rawText(f.raw); const p=parseAmanda(raw);
      sic.push(...(p.sections.T_SIC||[])); mats.push(...(p.sections.T_MATERIAL||[]));
    }
@@ -911,11 +927,14 @@ async function monthlyHistoricalRows(bounds){
  for(const snap of snaps){
   const date=String(snap.date||'').slice(0,10);
   if(!date||date<bounds.start||date>bounds.end||snap.status!=='LOCKED')continue;
-  const masterRaw=await rawText(snap.masterRaw||'');
+  let full;
+  try{full=await amiraReportSnapshot(snap);}catch(e){continue;}
+  if(!full)continue;
+  const masterRaw=await rawText(full.masterRaw||'');
   let localJobs=new Map(),localMats=new Map();
   try{const pm=parseMaster(masterRaw);localJobs=new Map((pm.sections.M_JOB||[]).map(r=>[clean(r.JOBCODE),r]));localMats=new Map((pm.sections.M_MATERIAL||[]).map(r=>[clean(r.MATERIALCODE),r]));}catch(e){}
   const files=[];
-  for(const f of snap.files||[]){try{const raw=await rawText(f.raw);files.push(parseAmanda(raw));}catch(e){}}
+  for(const f of full.files||[]){try{const raw=await rawText(f.raw);files.push(parseAmanda(raw));}catch(e){}}
   const sic=dedupRows(files.flatMap(p=>p.sections?.T_SIC||[]));
   const mats=dedupRows(files.flatMap(p=>p.sections?.T_MATERIAL||[]));
   const blockMap={};
@@ -1031,7 +1050,9 @@ async function dailyAllAfdelingData(targetDate){
  try{
    const sources=selected.slice();
    if(!hasActiveSnap&&activeAfd&&AMIRA_AFDELING_OPTIONS.includes(activeAfd)&&state.sections?.T_SIC?.length){sources.push({id:'__ACTIVE__',date,afdeling:activeAfd,masterRaw:state.masterRaw,files:state.files});}
-   for(const snap of sources){
+   for(const snap0 of sources){
+     const snap=snap0.id==='__ACTIVE__'?snap0:await amiraReportSnapshot(snap0);
+     if(!snap)continue;
      let masterRaw='';
      if(snap.masterRaw)masterRaw=await rawText(snap.masterRaw);
      state.masterRaw=masterRaw;
