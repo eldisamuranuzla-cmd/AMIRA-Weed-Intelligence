@@ -105,6 +105,7 @@ window.AMIRA_FIREBASE_READY = (async function(){
     // Mobile/network compatibility: force Firestore long-polling so restrictive
     // carrier/proxy connections do not leave the WebChannel hanging.
     db.settings({experimentalAutoDetectLongPolling:true, useFetchStreams:false});
+    if (typeof db.enableNetwork === 'function') { try { await db.enableNetwork(); } catch (_e) {} }
     if (!auth.currentUser) await auth.signInAnonymously();
     window.AMIRA_FIREBASE = {db, auth, app: firebase.app()};
     window.AMIRA_CLOUD_LAST_STATUS = 'CONNECTED';
@@ -269,11 +270,11 @@ async function rawText(v){if(v instanceof Blob)return await v.text();return Stri
 async function snapshot(){const afdeling=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');const master=state.masterRaw?new Blob([state.masterRaw],{type:'text/plain'}):'';const files=[];for(const f of state.files)files.push({name:f.name,raw:new Blob([String(f.raw||'')],{type:'text/csv'})});return {date:state.dataset.date,afdeling,id:state.dataset.id,status:'LOCKED',lockedAt:new Date().toISOString(),masterRaw:master,files}}
 function db(){return new Promise((res,rej)=>{let r=indexedDB.open(DB,5);r.onupgradeneeded=e=>{const dbi=r.result;if(!dbi.objectStoreNames.contains(STORE))dbi.createObjectStore(STORE,{keyPath:'date'});if(!dbi.objectStoreNames.contains(HSTORE))dbi.createObjectStore(HSTORE,{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('Database AMIRA sedang dipakai tab lain. Tutup tab AMIRA lain lalu coba lagi.'))})}
 async function clearHistory(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readwrite');tx.objectStore(HSTORE).clear();tx.objectStore(STORE).clear();tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error)}})}
-const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=60000;
+const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=30000, AMIRA_CLOUD_BATCH=20;
 async function amiraCloud(){try{return await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));}catch(e){return null}}
 function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;i<s.length;i+=AMIRA_CLOUD_CHUNK)out.push(s.slice(i,i+AMIRA_CLOUD_CHUNK));return out.length?out:['']}
-function amiraTimeout(promise,ms=20000){
-  return Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error('Timeout 20 detik saat menghubungi Firestore.')),ms))]);
+function amiraTimeout(promise,ms=180000){
+  return Promise.race([promise,new Promise((_,rej)=>setTimeout(()=>rej(new Error(`Timeout ${Math.round(ms/1000)} detik saat menghubungi Firestore.`)),ms))]);
 }
 async function amiraRestFetch(path, options={}, timeoutMs=20000){
   const fb=await amiraCloud();
@@ -331,30 +332,41 @@ async function cloudSaveSnapshot(s){
   // could be rejected by Google API consumer/API-key routing with 403
   // CONSUMER_INVALID even though Firebase Auth and Firestore Rules were valid.
   const db=fb.db;
+  if(typeof db.enableNetwork==='function'){ try{ await db.enableNetwork(); }catch(_e){} }
   const metaRef=db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
-  await metaRef.set({
+  const afd=snapAfdeling(s);
+  const lockedAt=s.lockedAt||new Date().toISOString();
+  const baseMeta={
     id,
     date:String(s.date||''),
-    afdeling:snapAfdeling(s),
+    afdeling:afd,
     status:String(s.status||'LOCKED'),
-    lockedAt:s.lockedAt||new Date().toISOString(),
+    lockedAt,
     fileCount:files.length,
+    syncStatus:'UPLOADING',
     updatedAt:new Date().toISOString()
-  },{merge:true});
+  };
+  // Create/refresh the parent document first so the dataset has a visible
+  // cloud record even while its chunks are being uploaded.
+  await metaRef.set(baseMeta,{merge:true});
 
   const writes=[];
   for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
     amiraChunkText(text).forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
   }
-  for(let i=0;i<writes.length;i+=50){
+  const totalBatches=Math.max(1,Math.ceil(writes.length/AMIRA_CLOUD_BATCH));
+  for(let i=0,bn=0;i<writes.length;i+=AMIRA_CLOUD_BATCH,bn++){
     const batch=db.batch();
-    for(const w of writes.slice(i,i+50)){
+    for(const w of writes.slice(i,i+AMIRA_CLOUD_BATCH)){
       const ref=metaRef.collection('chunks').doc(`${w.kind}_${w.index}`);
       batch.set(ref,{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
     }
     await batch.commit();
+    window.AMIRA_CLOUD_PROGRESS={id,batch:bn+1,totalBatches};
   }
+  await metaRef.set({syncStatus:'SYNCED',updatedAt:new Date().toISOString(),chunkCount:writes.length},{merge:true});
   window.AMIRA_CLOUD_LAST_STATUS='SYNCED';
+  window.AMIRA_CLOUD_PROGRESS={id,batch:totalBatches,totalBatches,done:true};
   return {id};
 }
 async function cloudListSnapshots(){
@@ -395,7 +407,7 @@ async function cloudGetSnapshot(id){
 async function saveSnapshotByDate(s){
   // Firebase menjadi gate sebelum dataset dianggap berhasil tersimpan/LOCKED.
   try{
-    await amiraTimeout(cloudSaveSnapshot(s),120000);
+    await amiraTimeout(cloudSaveSnapshot(s),180000);
   }catch(e){
     window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';
     const code=e?.code?` [${e.code}]`:'';
