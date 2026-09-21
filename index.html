@@ -269,7 +269,7 @@ async function rawText(v){if(v instanceof Blob)return await v.text();return Stri
 async function snapshot(){const afdeling=afdelingLabel(state.dataset.afdeling||inferAfdelingFromSections(state.sections)||'MULTI');const master=state.masterRaw?new Blob([state.masterRaw],{type:'text/plain'}):'';const files=[];for(const f of state.files)files.push({name:f.name,raw:new Blob([String(f.raw||'')],{type:'text/csv'})});return {date:state.dataset.date,afdeling,id:state.dataset.id,status:'LOCKED',lockedAt:new Date().toISOString(),masterRaw:master,files}}
 function db(){return new Promise((res,rej)=>{let r=indexedDB.open(DB,5);r.onupgradeneeded=e=>{const dbi=r.result;if(!dbi.objectStoreNames.contains(STORE))dbi.createObjectStore(STORE,{keyPath:'date'});if(!dbi.objectStoreNames.contains(HSTORE))dbi.createObjectStore(HSTORE,{keyPath:'id'});};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('Database AMIRA sedang dipakai tab lain. Tutup tab AMIRA lain lalu coba lagi.'))})}
 async function clearHistory(){let d=await db();return new Promise((res,rej)=>{const tx=d.transaction([HSTORE,STORE],'readwrite');tx.objectStore(HSTORE).clear();tx.objectStore(STORE).clear();tx.oncomplete=()=>{d.close();res()};tx.onerror=()=>{d.close();rej(tx.error)}})}
-const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=450000;
+const AMIRA_CLOUD_COLLECTION='amira_datasets', AMIRA_CLOUD_CHUNK=60000;
 async function amiraCloud(){try{return await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));}catch(e){return null}}
 function amiraChunkText(text){const out=[];const s=String(text||'');for(let i=0;i<s.length;i+=AMIRA_CLOUD_CHUNK)out.push(s.slice(i,i+AMIRA_CLOUD_CHUNK));return out.length?out:['']}
 function amiraTimeout(promise,ms=20000){
@@ -346,9 +346,9 @@ async function cloudSaveSnapshot(s){
   for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
     amiraChunkText(text).forEach((chunk,index)=>writes.push({kind,index,name,chunk}));
   }
-  for(let i=0;i<writes.length;i+=400){
+  for(let i=0;i<writes.length;i+=50){
     const batch=db.batch();
-    for(const w of writes.slice(i,i+400)){
+    for(const w of writes.slice(i,i+50)){
       const ref=metaRef.collection('chunks').doc(`${w.kind}_${w.index}`);
       batch.set(ref,{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
     }
