@@ -319,17 +319,12 @@ function fsDocPath(collection,id){return `${AMIRA_FS_BASE}/documents/${collectio
 function fsChunkPath(datasetId,chunkId){return `${AMIRA_FS_BASE}/documents/${AMIRA_CLOUD_COLLECTION}/${encodeURIComponent(String(datasetId))}/chunks/${encodeURIComponent(String(chunkId))}`}
 async function cloudSaveSnapshot(s){
   const fb=await amiraCloud(); if(!fb) throw new Error('Firebase belum terhubung. Pastikan Anonymous Authentication sudah diaktifkan.');
-  try{ await amiraFirestoreProbe(); }catch(e){
-    const detail=e?.errorDetails?` details=${JSON.stringify(e.errorDetails).slice(0,900)}`:'';
-    const raw=e?.rawBody?` raw=${String(e.rawBody).slice(0,1200)}`:'';
-    const http=e?.httpStatus?` HTTP ${e.httpStatus}`:'';
-    throw new Error(`Firestore probe gagal${http} [${e?.code||'UNKNOWN'}]: ${e?.message||e}${detail}${raw}`);
-  }
   const id=String(s.id||`AMIRA-${s.date}-${snapAfdeling(s)}`);
   const master=await rawText(s.masterRaw||'');
   const files=[]; for(const f of (s.files||[])) files.push({name:f.name,raw:await rawText(f.raw||'')});
-  // Use Firestore REST with the authenticated Anonymous ID token. This avoids the
-  // browser WebChannel that is timing out on the mobile network.
+  // Save directly via Firestore REST with the authenticated Anonymous ID token.
+  // Do not run a separate collection-list probe first; that probe can return
+  // CONSUMER_INVALID before the actual document/chunk write is attempted.
   await amiraRestFetch(`${fsDocPath(AMIRA_CLOUD_COLLECTION,id)}?updateMask.fieldPaths=id&updateMask.fieldPaths=date&updateMask.fieldPaths=afdeling&updateMask.fieldPaths=status&updateMask.fieldPaths=lockedAt&updateMask.fieldPaths=fileCount&updateMask.fieldPaths=updatedAt`,{
     method:'PATCH',body:JSON.stringify({fields:fsFields({id,date:String(s.date||''),afdeling:snapAfdeling(s),status:String(s.status||'LOCKED'),lockedAt:s.lockedAt||new Date().toISOString(),fileCount:files.length,updatedAt:new Date().toISOString()})})
   });
