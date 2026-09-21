@@ -332,7 +332,14 @@ async function cloudSaveSnapshot(s){
   // could be rejected by Google API consumer/API-key routing with 403
   // CONSUMER_INVALID even though Firebase Auth and Firestore Rules were valid.
   const db=fb.db;
-  if(typeof db.enableNetwork==='function'){ try{ await db.enableNetwork(); }catch(_e){} }
+  window.AMIRA_CLOUD_SYNC_DEBUG={id,stage:'START',afdeling:afd||snapAfdeling(s),fileCount:files.length};
+  if(typeof db.enableNetwork==='function'){
+    window.AMIRA_CLOUD_SYNC_DEBUG.stage='ENABLE_NETWORK';
+    try{ await db.enableNetwork(); }catch(e){
+      window.AMIRA_CLOUD_SYNC_DEBUG.enableNetworkError=e?.message||String(e);
+      console.warn('AMIRA enableNetwork warning:',e);
+    }
+  }
   const metaRef=db.collection(AMIRA_CLOUD_COLLECTION).doc(id);
   const afd=snapAfdeling(s);
   const lockedAt=s.lockedAt||new Date().toISOString();
@@ -348,7 +355,15 @@ async function cloudSaveSnapshot(s){
   };
   // Create/refresh the parent document first so the dataset has a visible
   // cloud record even while its chunks are being uploaded.
-  await metaRef.set(baseMeta,{merge:true});
+  window.AMIRA_CLOUD_SYNC_DEBUG.stage='PARENT_SET';
+  try{
+    await metaRef.set(baseMeta,{merge:true});
+  }catch(e){
+    window.AMIRA_CLOUD_SYNC_DEBUG.stage='PARENT_ERROR';
+    window.AMIRA_CLOUD_SYNC_DEBUG.errorCode=e?.code||'';
+    window.AMIRA_CLOUD_SYNC_DEBUG.errorMessage=e?.message||String(e);
+    throw e;
+  }
 
   const writes=[];
   for(const [kind,text,name] of [['master',master,'MASTER'],...files.map((f,i)=>['file'+i,f.raw,f.name])]){
@@ -356,15 +371,27 @@ async function cloudSaveSnapshot(s){
   }
   const totalBatches=Math.max(1,Math.ceil(writes.length/AMIRA_CLOUD_BATCH));
   for(let i=0,bn=0;i<writes.length;i+=AMIRA_CLOUD_BATCH,bn++){
+    window.AMIRA_CLOUD_SYNC_DEBUG.stage='BATCH_'+(bn+1)+'/'+totalBatches;
     const batch=db.batch();
     for(const w of writes.slice(i,i+AMIRA_CLOUD_BATCH)){
       const ref=metaRef.collection('chunks').doc(`${w.kind}_${w.index}`);
       batch.set(ref,{kind:w.kind,index:w.index,name:w.name,text:w.chunk});
     }
-    await batch.commit();
+    try{
+      await batch.commit();
+    }catch(e){
+      window.AMIRA_CLOUD_SYNC_DEBUG.stage='BATCH_ERROR';
+      window.AMIRA_CLOUD_SYNC_DEBUG.batch=bn+1;
+      window.AMIRA_CLOUD_SYNC_DEBUG.totalBatches=totalBatches;
+      window.AMIRA_CLOUD_SYNC_DEBUG.errorCode=e?.code||'';
+      window.AMIRA_CLOUD_SYNC_DEBUG.errorMessage=e?.message||String(e);
+      throw e;
+    }
     window.AMIRA_CLOUD_PROGRESS={id,batch:bn+1,totalBatches};
   }
+  window.AMIRA_CLOUD_SYNC_DEBUG.stage='FINAL_SET';
   await metaRef.set({syncStatus:'SYNCED',updatedAt:new Date().toISOString(),chunkCount:writes.length},{merge:true});
+  window.AMIRA_CLOUD_SYNC_DEBUG.stage='SYNCED';
   window.AMIRA_CLOUD_LAST_STATUS='SYNCED';
   window.AMIRA_CLOUD_PROGRESS={id,batch:totalBatches,totalBatches,done:true};
   return {id};
@@ -412,8 +439,9 @@ async function saveSnapshotByDate(s){
     window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';
     const code=e?.code?` [${e.code}]`:'';
     const msg=e?.message||String(e);
-    console.error('AMIRA Firebase sync gagal:',e);
-    throw new Error(`Firebase sync gagal${code}: ${msg}`);
+    const dbg=window.AMIRA_CLOUD_SYNC_DEBUG||{};
+    console.error('AMIRA Firebase sync gagal:',e,dbg);
+    throw new Error(`Firebase sync gagal${code}: ${msg} | tahap=${dbg.stage||'UNKNOWN'} | id=${dbg.id||s.id||'UNKNOWN'}`);
   }
   // Setelah cloud sukses, simpan copy lokal untuk Historical/offline cache.
   let d=await db();
