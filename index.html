@@ -395,7 +395,7 @@ async function cloudGetSnapshot(id){
 async function saveSnapshotByDate(s){
   // Firebase menjadi gate sebelum dataset dianggap berhasil tersimpan/LOCKED.
   try{
-    await amiraTimeout(cloudSaveSnapshot(s),20000);
+    await amiraTimeout(cloudSaveSnapshot(s),120000);
   }catch(e){
     window.AMIRA_CLOUD_LAST_STATUS='OFFLINE';
     const code=e?.code?` [${e.code}]`:'';
