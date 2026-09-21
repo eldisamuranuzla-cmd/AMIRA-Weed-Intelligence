@@ -120,6 +120,53 @@ window.AMIRA_FIREBASE_READY = (async function(){
 })();
 </script>
 <script>
+/* AMIRA AUTH DIAGNOSTIC: read-only, activated only with ?authdiag=1 */
+(async function(){
+  if(!/[?&]authdiag=1(?:&|$)/.test(location.search)) return;
+  try{
+    const fb=await (window.AMIRA_FIREBASE_READY||Promise.resolve(null));
+    if(!fb?.auth?.currentUser) throw new Error('Anonymous Auth tidak menghasilkan currentUser.');
+    const u=fb.auth.currentUser;
+    const r=await u.getIdTokenResult(true);
+    const c=r.claims||{};
+    const project=(fb.app?.options?.projectId)||'';
+    const target='amira-field-intelligence';
+    let restStatus='NOT_TESTED', restMessage='';
+    try{
+      const token=await u.getIdToken(true);
+      const res=await fetch('https://firestore.googleapis.com/v1/projects/'+target+'/databases/(default)/documents/amira_datasets?pageSize=1',{
+        headers:{Authorization:'Bearer '+token}
+      });
+      const txt=await res.text();
+      restStatus=String(res.status);
+      try{
+        const j=txt?JSON.parse(txt):{};
+        restMessage=j?.error?.message||txt.slice(0,300);
+      }catch(_){restMessage=txt.slice(0,300)}
+    }catch(e){restStatus='FETCH_ERROR';restMessage=e?.message||String(e)}
+    const lines=[
+      'AMIRA AUTH DIAGNOSTIC',
+      'Project app: '+project,
+      'Target Firestore: '+target,
+      'UID: '+(u.uid||'-'),
+      'Provider: '+((u.providerData||[])[0]?.providerId||'anonymous'),
+      'Token aud: '+(c.aud||'-'),
+      'Token iss: '+(c.iss||'-'),
+      'Token sub: '+(c.sub||'-'),
+      'Token firebase.sign_in_provider: '+(c.firebase?.sign_in_provider||'-'),
+      'Token expired: '+String(r.expirationTime && new Date(r.expirationTime)<new Date()),
+      'REST GET Firestore: HTTP '+restStatus,
+      'REST message: '+restMessage
+    ];
+    console.log(lines.join('\n'));
+    alert(lines.join('\n'));
+  }catch(e){
+    alert('AMIRA AUTH DIAGNOSTIC GAGAL\n'+(e?.message||String(e)));
+    console.error(e);
+  }
+})();
+</script>
+<script>
 (()=>{
 const $=id=>document.getElementById(id), fmt=n=>Number(n||0).toLocaleString('id-ID',{maximumFractionDigits:2}), num=v=>{const x=parseFloat(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:0}, clean=v=>String(v??'').trim(), pct=(a,b)=>b?Math.round(a/b*100):0;
 const WS=['CPT','CWM','WDC','WDM','OTHER'];
