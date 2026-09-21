@@ -285,7 +285,8 @@ async function amiraRestFetch(path, options={}, timeoutMs=20000){
     const headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},options.headers||{});
     // Use OAuth bearer authentication only. Do not append the browser API key:
     // restricted API keys can return CONSUMER_INVALID even when Firestore/Auth are valid.
-    const url='https://firestore.googleapis.com/v1/'+path;
+    const firebaseApiKey='AIzaSyDGvAVIVOF3nIRKYk2qHSLrnwrFpOHVFCk';
+    const url='https://firestore.googleapis.com/v1/'+path+'?key='+encodeURIComponent(firebaseApiKey);
     const res=await fetch(url,{...options,headers,signal:ctrl.signal});
     const txt=await res.text();
     let body=null; try{body=txt?JSON.parse(txt):null}catch(_e){body=txt}
